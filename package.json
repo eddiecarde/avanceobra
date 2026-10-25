@@ -1,0 +1,30 @@
+{
+  "name": "avanceobra",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "db:check": "node supabase/tests/validate.mjs",
+    "db:bundle": "node supabase/setup/build.mjs",
+    "test:functions": "npm run build:functions && vitest run supabase/tests",
+    "verify": "turbo run build typecheck test && npm run test:functions && npm run db:check && npm run test:e2e -w @avanceobra/web",
+    "build:functions": "node scripts/build-functions.mjs",
+    "test:e2e": "npm run test:e2e -w @avanceobra/web"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4",
+    "@electric-sql/pglite": "0.5.10",
+    "@electric-sql/pglite-postgis": "0.2.10",
+    "pdf-lib": "1.17.1",
+    "esbuild": "^0.28.2"
+  },
+  "packageManager": "npm@11.13.0"
+}

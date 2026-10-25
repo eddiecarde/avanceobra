@@ -1,0 +1,20 @@
+{
+  "name": "@avanceobra/engine",
+  "version": "0.1.0",
+  "description": "Motor de cálculo: rendimientos, equipos, proyección, costos, multa vs. aceleración, Pareto y geometría",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "caso16": "npm run build && node examples/caso16.mjs"
+  }
+}

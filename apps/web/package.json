@@ -1,0 +1,44 @@
+{
+  "name": "@avanceobra/web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --port 3100",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@avanceobra/engine": "^0.1.0",
+    "@avanceobra/forms": "^0.1.0",
+    "@avanceobra/importers": "^0.1.0",
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "@supabase/supabase-js": "^2.117.3",
+    "exceljs": "^4.4.0",
+    "geotiff": "^3.0.5",
+    "jszip": "^3.10.2",
+    "maplibre-gl": "^5.24.0",
+    "next": "16.4.2",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^6.4.299",
+    "proj4": "^2.22.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "recharts": "^3.3.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@tailwindcss/turbopack": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.4.2",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}

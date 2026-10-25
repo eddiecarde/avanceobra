@@ -1,0 +1,81 @@
+# PowerSync · Sync Streams (edición 3)
+# Pegar en el panel de PowerSync > Sync Streams, luego "Validate" y "Deploy".
+#
+# Cada dispositivo descarga solo los proyectos donde el usuario tiene membresía
+# (equivalente a RLS para la réplica local). Todas las consultas usan el mismo
+# filtro `mis_proyectos`, así que se agrupan en un bucket por proyecto.
+
+config:
+  edition: 3
+
+streams:
+  mi_perfil:
+    auto_subscribe: true
+    query: SELECT id, full_name, locale FROM profiles WHERE id = auth.user_id()
+
+  estructura:
+    auto_subscribe: true
+    with:
+      mis_proyectos: SELECT project_id FROM memberships WHERE user_id = auth.user_id()
+    queries:
+      - SELECT id, org_id, code, name, project_type, currency, start_date, contract_end_date, logo_path FROM projects WHERE id IN mis_proyectos
+      - SELECT id, user_id, project_id, role, member_name FROM memberships WHERE project_id IN mis_proyectos
+      - SELECT id, project_id, code, name, max_parallel_resources FROM fronts WHERE project_id IN mis_proyectos
+      - SELECT id, project_id, front_id, code, name, unit, contract_qty, planned_start, planned_finish, template_id FROM activities WHERE project_id IN mis_proyectos
+      - SELECT id, project_id, front_id, activity_id, kind, code, qr_code, qty, geojson FROM elements WHERE project_id IN mis_proyectos
+
+  # Planos: cada usuario recibe solo los que puede ver (generales, de su empresa y, si es del
+  # contratista o administrador, los de las demás). plan_access la mantiene la base de datos.
+  planos:
+    auto_subscribe: true
+    with:
+      mis_planos: SELECT plan_id FROM plan_access WHERE user_id = auth.user_id()
+    query: SELECT id, project_id, front_id, name, version, storage_path, source_format, corners FROM site_plans WHERE id IN mis_planos
+
+  avance:
+    auto_subscribe: true
+    with:
+      mis_proyectos: SELECT project_id FROM memberships WHERE user_id = auth.user_id()
+    queries:
+      - SELECT id, project_id, front_id, activity_id, template_version_id, work_date, quantity, effective_hours, lost_hours, loss_cause, weather, crew_size, notes, lat, lon, gps_accuracy_m, "values", status, signature_path, created_by, approved_by, approved_at, rejection_reason, device_id, client_created_at, version FROM progress_entries WHERE project_id IN mis_proyectos
+      - SELECT id, project_id, entry_id, geojson, area_m2, is_approximate FROM progress_areas WHERE project_id IN mis_proyectos
+      - SELECT id, project_id, entry_id, element_id FROM entry_elements WHERE project_id IN mis_proyectos
+      - SELECT id, project_id, entry_id, finding_id, storage_path, taken_at, annotation, uploaded, purpose FROM photos WHERE project_id IN mis_proyectos
+
+  hallazgos:
+    auto_subscribe: true
+    with:
+      mis_proyectos: SELECT project_id FROM memberships WHERE user_id = auth.user_id()
+    queries:
+      - SELECT id, project_id, front_id, type, severity, status, description, lat, lon, responsible_user_id, due_date, created_by, created_at, updated_at, closed_at, version, category, impeditive, activity_id, company_id, corrective_action, verification_note, verified_at FROM findings WHERE project_id IN mis_proyectos
+      # Calidad sin señal: empresas responsables y listas de chequeo activas
+      - SELECT id, project_id, name, kind FROM project_companies WHERE project_id IN mis_proyectos
+      - SELECT id, project_id, name, activity_id, items, active FROM checklists WHERE project_id IN mis_proyectos AND active = true
+      - SELECT id, project_id, kind, severity, title, body, ref_table, ref_id, created_at FROM alerts WHERE project_id IN mis_proyectos
+      - SELECT id, project_id, table_name, row_id, server_values, client_values, client_user, server_user, resolved, created_at FROM sync_conflicts WHERE project_id IN mis_proyectos
+
+  # Lo que toca hoy (plan semanal comprometido) y entregas de material registradas en obra
+  plan_y_materiales:
+    auto_subscribe: true
+    with:
+      mis_proyectos: SELECT project_id FROM memberships WHERE user_id = auth.user_id()
+    queries:
+      - SELECT id, project_id, week_start, status FROM weekly_plans WHERE project_id IN mis_proyectos AND status = 'comprometido'
+      - SELECT id, plan_id, project_id, activity_id, planned_qty, responsible FROM weekly_plan_items WHERE project_id IN mis_proyectos
+      - SELECT id, project_id, name, unit FROM materials WHERE project_id IN mis_proyectos
+      - SELECT id, project_id, material_id, delivered_on, quantity, document, supplier, notes, created_by, created_at FROM material_deliveries WHERE project_id IN mis_proyectos
+
+  # Avisos personales: cada quien recibe solo los suyos (asignaciones, correcciones, rechazos, vencimientos)
+  avisos:
+    auto_subscribe: true
+    query: SELECT id, user_id, project_id, kind, title, body, ref_table, ref_id, created_at, read_at FROM user_notifications WHERE user_id = auth.user_id()
+
+  # Formatos editables de la empresa (todas las versiones publicadas: cada registro
+  # se valida y se muestra con la versión con que se llenó)
+  formatos:
+    auto_subscribe: true
+    with:
+      mis_empresas: SELECT org_id FROM memberships WHERE user_id = auth.user_id()
+    queries:
+      - SELECT id, org_id, name, category, work_type, current_version, archived FROM form_templates WHERE org_id IN mis_empresas
+      - SELECT id, org_id, template_id, version, schema FROM form_template_versions WHERE org_id IN mis_empresas
