@@ -156,15 +156,15 @@ function historicalRate(records, lastNDays) {
   };
 }
 function compareRates(referencePerUnit, realPerUnit, resourceName = "el recurso") {
-  const ratio = referencePerUnit > 0 ? realPerUnit / referencePerUnit : 0;
+  const ratio2 = referencePerUnit > 0 ? realPerUnit / referencePerUnit : 0;
   const warnings = [];
-  if (ratio < 0.6)
+  if (ratio2 < 0.6)
     warnings.push(
-      `El rendimiento real de ${resourceName} es ${(ratio * 100).toFixed(0)} % del de referencia. Probablemente el recurso limitante es otro (acarreo/volquetas, compactaci\xF3n, frente de trabajo o permisos): revise la cadena antes de agregar m\xE1s unidades de ${resourceName}.`
+      `El rendimiento real de ${resourceName} es ${(ratio2 * 100).toFixed(0)} % del de referencia. Probablemente el recurso limitante es otro (acarreo/volquetas, compactaci\xF3n, frente de trabajo o permisos): revise la cadena antes de agregar m\xE1s unidades de ${resourceName}.`
     );
-  else if (ratio > 1.3)
-    warnings.push(`El rendimiento real supera en ${((ratio - 1) * 100).toFixed(0)} % la referencia: verifique las cantidades reportadas.`);
-  return { referencePerUnit, realPerUnit, ratio, warnings };
+  else if (ratio2 > 1.3)
+    warnings.push(`El rendimiento real supera en ${((ratio2 - 1) * 100).toFixed(0)} % la referencia: verifique las cantidades reportadas.`);
+  return { referencePerUnit, realPerUnit, ratio: ratio2, warnings };
 }
 
 // packages/engine/src/equipment.ts
@@ -775,13 +775,13 @@ function relaxPlan(sim, start) {
 function uniformAcceleration(sim) {
   const base = evaluatePlan(sim, basePlan(sim));
   if (base.delayDays === 0) return base;
-  const ratio = sim.availableDays / base.projectDuration;
+  const ratio2 = sim.availableDays / base.projectDuration;
   const rules = rulesOf(sim);
   const plan = basePlan(sim);
   for (const a of sim.activities) {
     if (!canAccelerate(a)) continue;
     const d0 = ceilDays(a.pendingQty, activityDailyOutput(a, plan[a.id], rules));
-    const target = Math.max(1, Math.floor(d0 * ratio));
+    const target = Math.max(1, Math.floor(d0 * ratio2));
     let chosen = null;
     const maxExtra = (a.maxUnits ?? a.currentUnits + 10) - a.currentUnits;
     for (let s = 1; s <= (a.maxShifts ?? 1); s++) {
@@ -1485,6 +1485,147 @@ function materialStatus(materials, usage, activities, daily, deliveries, today, 
     };
   });
 }
+
+// packages/engine/src/evm.ts
+var ratio = (a, b) => b > 0 ? a / b : null;
+function parteCosts(days, personnelRates, equipmentRates) {
+  const items = [];
+  const roles = /* @__PURE__ */ new Set();
+  const equipment = /* @__PURE__ */ new Set();
+  for (const d of days) {
+    let personal = 0;
+    let equipos = 0;
+    for (const [role, qty] of Object.entries(d.personnel)) {
+      const r = personnelRates[role];
+      if (r) personal += qty * r;
+      else roles.add(role);
+    }
+    for (const [name, qty] of Object.entries(d.equipment)) {
+      const r = equipmentRates[name];
+      if (r) equipos += qty * r;
+      else equipment.add(name);
+    }
+    if (personal) items.push({ date: d.date, amount: personal, source: "personal" });
+    if (equipos) items.push({ date: d.date, amount: equipos, source: "equipos" });
+  }
+  return { items, unpricedRoles: [...roles].sort(), unpricedEquipment: [...equipment].sort() };
+}
+function sundayOf(d) {
+  const dow = (/* @__PURE__ */ new Date(`${d}T12:00:00Z`)).getUTCDay();
+  return addDays(d, dow === 0 ? 0 : 7 - dow);
+}
+function earnedValue(input) {
+  const { activities, cutoff } = input;
+  const cal = input.calendar ?? {};
+  const budgeted = activities.filter((a) => a.budgetUnitCost != null && a.budgetUnitCost > 0 && a.contractQty > 0);
+  const price = new Map(budgeted.map((a) => [a.id, a.budgetUnitCost]));
+  const bac = budgeted.reduce((t, a) => t + a.contractQty * a.budgetUnitCost, 0);
+  const firstDates = [
+    ...budgeted.map((a) => a.plannedStart).filter((d) => !!d),
+    ...input.approved.map((e) => e.date),
+    ...input.costs.map((c) => c.date)
+  ].filter((d) => d <= cutoff);
+  const first = firstDates.length ? firstDates.reduce((a, b) => a < b ? a : b) : cutoff;
+  const lastFinish = budgeted.reduce((m, a) => a.plannedFinish && a.plannedFinish > m ? a.plannedFinish : m, cutoff);
+  const count = workdayCounter(cal, first < cutoff ? first : cutoff, lastFinish);
+  const pvAt = (date) => {
+    let pv2 = 0;
+    for (const a of budgeted) {
+      if (!a.plannedStart || !a.plannedFinish || date < a.plannedStart) continue;
+      if (date >= a.plannedFinish) {
+        pv2 += a.contractQty * a.budgetUnitCost;
+        continue;
+      }
+      const total = count(a.plannedStart, a.plannedFinish);
+      pv2 += (total > 0 ? a.contractQty * count(a.plannedStart, date) / total : a.contractQty) * a.budgetUnitCost;
+    }
+    return pv2;
+  };
+  const evByDate = /* @__PURE__ */ new Map();
+  for (const e of input.approved) {
+    const p = price.get(e.activityId);
+    if (p && e.date <= cutoff) evByDate.set(e.date, (evByDate.get(e.date) ?? 0) + e.quantity * p);
+  }
+  const acByDate = /* @__PURE__ */ new Map();
+  const acBySource = { personal: 0, equipos: 0, materiales: 0, subcontratos: 0, otros: 0 };
+  for (const c of input.costs) {
+    if (c.date > cutoff) continue;
+    acByDate.set(c.date, (acByDate.get(c.date) ?? 0) + c.amount);
+    acBySource[c.source] += c.amount;
+  }
+  const cumulative = (m) => {
+    const dates = [...m.keys()].sort();
+    let run = 0;
+    const cum = dates.map((d) => run += m.get(d));
+    return (date) => {
+      let lo = 0;
+      let hi = dates.length - 1;
+      let idx = -1;
+      while (lo <= hi) {
+        const mid = lo + hi >> 1;
+        if (dates[mid] <= date) idx = mid, lo = mid + 1;
+        else hi = mid - 1;
+      }
+      return idx < 0 ? 0 : cum[idx];
+    };
+  };
+  const evAt = cumulative(evByDate);
+  const acAt = cumulative(acByDate);
+  const ends = [];
+  for (let d = sundayOf(first); d < cutoff; d = addDays(d, 7)) ends.push(d);
+  ends.push(cutoff);
+  const series = (input.weeks ? ends.slice(-input.weeks) : ends).map((date) => {
+    const pv2 = pvAt(date);
+    const ev2 = evAt(date);
+    const ac2 = acAt(date);
+    return { date, pv: pv2, ev: ev2, ac: ac2, spi: ratio(ev2, pv2), cpi: ratio(ev2, ac2) };
+  });
+  const now = series.at(-1);
+  const { pv, ev, ac } = now;
+  const spi = now.spi;
+  const cpi = now.cpi;
+  const eac = cpi ? bac / cpi : null;
+  const readings = [];
+  const pctTxt = (x) => `${Math.round(x * 100)} %`;
+  const f2 = (x) => x.toFixed(2).replace(".", ",");
+  if (bac === 0) readings.push("Sin costo presupuestado por actividad no hay valor ganado: c\xE1rgalo en Costos y productividad o en el Excel de la programaci\xF3n.");
+  else if (budgeted.length < activities.length)
+    readings.push(`Solo ${budgeted.length} de ${activities.length} actividades tienen costo presupuestado: el valor ganado no incluye las dem\xE1s.`);
+  if (bac > 0 && ac === 0) readings.push("A\xFAn no hay costo real: pon tarifas al personal y equipos del parte, precios a los materiales o registra los costos.");
+  if (spi != null && cpi != null) {
+    if (cpi >= 1 && spi < 0.95)
+      readings.push(`El costo se ve bien (CPI ${f2(cpi)}) pero el avance va atrasado (SPI ${f2(spi)}): se gast\xF3 menos porque se avanz\xF3 menos.`);
+    else if (cpi < 0.95 && spi >= 1)
+      readings.push(`Se va al d\xEDa o adelantado (SPI ${f2(spi)}) pero gastando de m\xE1s (CPI ${f2(cpi)}): revisa si se est\xE1 acelerando a un costo que no compensa.`);
+    else if (cpi < 0.95 && spi < 0.95)
+      readings.push(`Atrasado (SPI ${f2(spi)}) y con sobrecosto (CPI ${f2(cpi)}): cada $1 gastado produce $${f2(cpi)} de obra.`);
+    else if (cpi >= 0.95 && spi >= 0.95) readings.push(`Plazo y costo dentro de lo previsto (SPI ${f2(spi)}, CPI ${f2(cpi)}).`);
+  }
+  const back = series.at(-5);
+  if (back?.cpi != null && cpi != null && Math.abs(cpi - back.cpi) >= 0.05)
+    readings.push(`El CPI ${cpi > back.cpi ? "mejor\xF3" : "empeor\xF3"} de ${f2(back.cpi)} a ${f2(cpi)} en las \xFAltimas 4 semanas.`);
+  if (eac != null && bac > 0 && eac > bac * 1.02)
+    readings.push(`Al ritmo de costo actual la obra costar\xEDa ${pctTxt(eac / bac - 1)} m\xE1s que el presupuesto.`);
+  return {
+    bac,
+    budgetedActivities: budgeted.length,
+    totalActivities: activities.length,
+    pv,
+    ev,
+    ac,
+    sv: ev - pv,
+    cv: ev - ac,
+    spi,
+    cpi,
+    eac,
+    etc: eac != null ? Math.max(0, eac - ac) : null,
+    vac: eac != null ? bac - eac : null,
+    tcpi: bac - ac > 0 ? (bac - ev) / (bac - ac) : null,
+    acBySource,
+    series,
+    readings
+  };
+}
 export {
   DEFAULT_SENSITIVITY,
   DEFAULT_SHIFT_RULES,
@@ -1513,6 +1654,7 @@ export {
   describePlan,
   diffDays,
   durationDays,
+  earnedValue,
   easterSunday,
   energizationReadiness,
   evaluatePlan,
@@ -1534,6 +1676,7 @@ export {
   optimizeCriticalPath,
   pareto,
   parseDate,
+  parteCosts,
   paymentCertificate,
   penaltyCost,
   penaltyFromPercent,

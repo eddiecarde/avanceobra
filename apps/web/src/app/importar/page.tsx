@@ -169,7 +169,7 @@ export default function Importar() {
           <ul className="mt-2 list-disc space-y-0.5 pl-5 text-sm text-zinc-700 dark:text-zinc-300">
             <li>
               Hoja <b>Actividades</b> (obligatoria), una fila por actividad: <b>Frente, Código, Nombre, Unidad, Cantidad</b>. Opcionales: Inicio, Fin
-              (dd/mm/aaaa), Predecesoras (códigos separados por coma), Grupo y Subcampo.
+              (dd/mm/aaaa), Predecesoras (códigos separados por coma), Grupo, Subcampo y Costo unitario (costo directo presupuestado por unidad, para el valor ganado).
             </li>
             <li>
               Hoja <b>Frentes</b> (opcional): Código, Nombre y Máx recursos. Si no está, los frentes se crean con los códigos de la columna Frente.

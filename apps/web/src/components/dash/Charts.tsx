@@ -218,3 +218,89 @@ export function DailyBarsChart({
     </div>
   );
 }
+
+/** Curvas del valor ganado en dinero (un solo eje): planeado (PV), ganado (EV) y costo real (AC). */
+export function EvmChart({ rows, format }: { rows: { date: string; pv: number; ev: number; ac: number }[]; format: (v: number) => string }) {
+  if (!rows.length) return <p className="py-10 text-center text-zinc-500">Sin datos todavía.</p>;
+  const short = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}`;
+  const series = [
+    { key: "pv", label: "Planeado (PV)", color: "var(--viz-1)", dashed: true },
+    { key: "ev", label: "Ganado (EV)", color: "var(--viz-3)" },
+    { key: "ac", label: "Costo real (AC)", color: "var(--viz-2)" },
+  ] as const;
+  const last = rows.at(-1)!;
+  return (
+    <div>
+      <Legend items={series.map((s) => ({ label: s.label, color: s.color, dashed: "dashed" in s }))} />
+      <div
+        className="h-72 w-full"
+        role="img"
+        aria-label={`Valor ganado al ${last.date}: planeado ${format(last.pv)}, ganado ${format(last.ev)}, costo real ${format(last.ac)}`}
+      >
+        <ResponsiveContainer>
+          <LineChart data={rows} margin={{ top: 16, right: 16, bottom: 8, left: 0 }}>
+            <CartesianGrid stroke="var(--viz-grid)" vertical={false} />
+            <XAxis dataKey="date" tickFormatter={short} tick={axisTick} stroke="var(--viz-grid)" minTickGap={24} />
+            <YAxis tickFormatter={(v: number) => format(v)} tick={axisTick} stroke="var(--viz-grid)" width={64} />
+            <Tooltip
+              content={({ active, payload }: TipProps) => {
+                if (!active || !payload?.length) return null;
+                const r = payload[0]!.payload as { date: string; pv: number; ev: number; ac: number };
+                return <TooltipBox title={`Semana al ${r.date}`} rows={series.map((s) => ({ label: s.label, value: format(r[s.key]), color: s.color, dashed: "dashed" in s }))} />;
+              }}
+            />
+            {series.map((s) => (
+              <Line
+                key={s.key}
+                type="linear"
+                dataKey={s.key}
+                stroke={s.color}
+                strokeWidth={2}
+                strokeDasharray={"dashed" in s ? "6 4" : undefined}
+                dot={false}
+                activeDot={{ r: 4, stroke: "var(--viz-surface)", strokeWidth: 2 }}
+                isAnimationActive={false}
+              />
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+/** Tendencia semanal de SPI y CPI con la línea de 1,0 (lo previsto). */
+export function IndexTrendChart({ rows }: { rows: { date: string; spi: number | null; cpi: number | null }[] }) {
+  if (rows.length < 2) return <p className="py-10 text-center text-zinc-500">Hace falta más de una semana de datos.</p>;
+  const short = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}`;
+  const series = [
+    { key: "spi", label: "SPI (plazo)", color: "var(--viz-1)" },
+    { key: "cpi", label: "CPI (costo)", color: "var(--viz-2)" },
+  ] as const;
+  const fmt = (v: number | null) => (v == null ? "—" : v.toLocaleString("es-CO", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+  return (
+    <div>
+      <Legend items={series.map((s) => ({ label: s.label, color: s.color }))} />
+      <div className="h-56 w-full" role="img" aria-label="Tendencia semanal de SPI y CPI">
+        <ResponsiveContainer>
+          <LineChart data={rows} margin={{ top: 16, right: 16, bottom: 8, left: 0 }}>
+            <CartesianGrid stroke="var(--viz-grid)" vertical={false} />
+            <XAxis dataKey="date" tickFormatter={short} tick={axisTick} stroke="var(--viz-grid)" minTickGap={24} />
+            <YAxis domain={[0, (max: number) => Math.max(1.2, Math.ceil(max * 10) / 10)]} tickFormatter={(v: number) => fmt(v)} tick={axisTick} stroke="var(--viz-grid)" width={44} />
+            <ReferenceLine y={1} stroke="var(--viz-text-2)" strokeDasharray="4 4" label={{ value: "1,00 = lo previsto", position: "insideBottomRight", fill: "var(--viz-text)", fontSize: 12 }} />
+            <Tooltip
+              content={({ active, payload }: TipProps) => {
+                if (!active || !payload?.length) return null;
+                const r = payload[0]!.payload as { date: string; spi: number | null; cpi: number | null };
+                return <TooltipBox title={`Semana al ${r.date}`} rows={series.map((s) => ({ label: s.label, value: fmt(r[s.key]), color: s.color }))} />;
+              }}
+            />
+            {series.map((s) => (
+              <Line key={s.key} type="linear" dataKey={s.key} stroke={s.color} strokeWidth={2} dot={{ r: 4, fill: s.color, stroke: "var(--viz-surface)", strokeWidth: 2 }} connectNulls isAnimationActive={false} />
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}

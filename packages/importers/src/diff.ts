@@ -24,10 +24,12 @@ export interface ExistingActivity {
   externalRef: string | null;
   /** Cantidad ya registrada en campo (enviada o aprobada): protege la unidad y la cantidad. */
   executedQty?: number;
+  /** Costo directo presupuestado por unidad. */
+  budgetUnitCost?: number | null;
 }
 
 export interface FieldChange {
-  field: "frente" | "nombre" | "unidad" | "cantidad" | "inicio" | "fin" | "predecesoras";
+  field: "frente" | "nombre" | "unidad" | "cantidad" | "inicio" | "fin" | "predecesoras" | "costo unitario";
   from: string;
   to: string;
 }
@@ -103,6 +105,8 @@ export function diffImport(existing: { fronts: ExistingFront[]; activities: Exis
     if (a.quantity != null && Math.abs(a.quantity - ex.contractQty) > 1e-9) changes.push({ field: "cantidad", from: fmtQty(ex.contractQty), to: fmtQty(a.quantity) });
     if (a.start && a.start !== ex.plannedStart) changes.push({ field: "inicio", from: ex.plannedStart ?? "—", to: a.start });
     if (a.finish && a.finish !== ex.plannedFinish) changes.push({ field: "fin", from: ex.plannedFinish ?? "—", to: a.finish });
+    if (a.budgetUnitCost != null && Math.abs(a.budgetUnitCost - (ex.budgetUnitCost ?? -1)) > 1e-6)
+      changes.push({ field: "costo unitario", from: ex.budgetUnitCost == null ? "—" : fmtQty(ex.budgetUnitCost), to: fmtQty(a.budgetUnitCost) });
     // Lo que ya tiene avance no se puede deformar por importación
     const executed = ex.executedQty ?? 0;
     if (executed > 0 && a.unit && a.unit !== ex.unit)

@@ -84,7 +84,7 @@ export async function loadExisting(projectId: string): Promise<Existing> {
     fetchAll((x, y) =>
       supabase
         .from("activities")
-        .select("id, front_id, code, name, unit, contract_qty, planned_start, planned_finish, predecessors, external_ref, work_group, subfield")
+        .select("id, front_id, code, name, unit, contract_qty, planned_start, planned_finish, predecessors, external_ref, work_group, subfield, budget_unit_cost")
         .eq("project_id", projectId)
         .order("code")
         .order("id")
@@ -118,6 +118,7 @@ export async function loadExisting(projectId: string): Promise<Existing> {
       predecessorIds: (x.predecessors as string[] | null) ?? [],
       externalRef: x.external_ref,
       executedQty: executed.get(x.id) ?? 0,
+      budgetUnitCost: x.budget_unit_cost == null ? null : Number(x.budget_unit_cost),
     })),
     lastRecorded,
     calendar: p.data ? projectCalendar(p.data) : {},
@@ -215,6 +216,7 @@ export async function applyImport(projectId: string, existing: Existing, diff: I
         if (c.field === "cantidad") patch.contract_qty = a.quantity;
         if (c.field === "inicio") patch.planned_start = a.start;
         if (c.field === "fin") patch.planned_finish = a.finish;
+        if (c.field === "costo unitario") patch.budget_unit_cost = a.budgetUnitCost;
       }
       const ex = existing.activities.find((x) => x.id === op.existingId);
       if (a.externalRef && !ex?.externalRef) patch.external_ref = a.externalRef;
@@ -290,6 +292,7 @@ function extras(a: ImportDiff["activities"][number]["activity"]) {
   if (a.weight != null) out.weight = Math.min(1, Math.max(0, a.weight));
   if (a.subfield !== undefined) out.subfield = a.subfield;
   if (a.workGroup !== undefined) out.work_group = a.workGroup;
+  if (a.budgetUnitCost != null) out.budget_unit_cost = a.budgetUnitCost;
   return out;
 }
 
@@ -310,7 +313,8 @@ export async function buildTemplate(projectName: string, existing: Existing): Pr
     "1. Hoja Frentes: un frente por fila (código único, nombre y, si aplica, máximo de recursos en paralelo).",
     "2. Hoja Actividades: frente (código), código único de la actividad, nombre, unidad, cantidad contractual,",
     "   inicio y fin programados (dd/mm/aaaa) y predecesoras (códigos separados por coma).",
-    "   Opcionales: Grupo (agrupa actividades para el KPI semanal) y Subcampo (o Tramo, Sector, Piso: la zona de la obra).",
+    "   Opcionales: Grupo (agrupa actividades para el KPI semanal), Subcampo (o Tramo, Sector, Piso: la zona de la obra)",
+    "   y Costo unitario (costo directo presupuestado por unidad: con él se calcula el valor ganado).",
     "   Obligatorias: Frente, Código, Nombre, Unidad y Cantidad (un número, sin la unidad dentro de la celda).",
     "3. Las actividades se reconocen por su código: si ya existe se actualiza, si no, se crea.",
     "4. Nada se borra: las actividades que quites del archivo se conservan con su avance.",
@@ -340,6 +344,7 @@ export async function buildTemplate(projectName: string, existing: Existing): Pr
     { header: "Predecesoras", key: "preds", width: 24 },
     { header: "Grupo", key: "group", width: 18 },
     { header: "Subcampo", key: "zone", width: 12 },
+    { header: "Costo unitario", key: "cost", width: 16, style: { numFmt: '"$"#,##0' } },
   ];
   const zone = new Map(existing.zones.map((z) => [z.id, z]));
   const frontCode = new Map(existing.fronts.map((f) => [f.id, f.code]));
@@ -357,6 +362,7 @@ export async function buildTemplate(projectName: string, existing: Existing): Pr
       preds: a.predecessorIds.map((id) => code.get(id)).filter(Boolean).join(", "),
       group: zone.get(a.id)?.workGroup ?? null,
       zone: zone.get(a.id)?.subfield ?? null,
+      cost: a.budgetUnitCost ?? null,
     }),
   );
   if (!existing.activities.length) {

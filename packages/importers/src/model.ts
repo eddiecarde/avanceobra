@@ -29,6 +29,8 @@ export interface ImportActivity {
   weight?: number | null;
   subfield?: string | null;
   workGroup?: string | null;
+  /** Solo si el archivo la trae: costo directo presupuestado por unidad (para el valor ganado). */
+  budgetUnitCost?: number | null;
   /** Líneas base del cronograma (MS Project: 0 = la línea base, 1-10 = las demás). */
   baselines?: { name: string; start: string | null; finish: string | null }[];
   /** Avance registrado en el cronograma: % completado y fechas reales. */

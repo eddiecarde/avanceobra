@@ -19,6 +19,8 @@ export const ACTIVITY_COLUMNS = {
   // Opcionales: agrupan la obra para el KPI semanal y la matriz por zona
   group: ["grupo", "grupo de trabajo", "partida", "capitulo"],
   zone: ["subcampo", "tramo", "sector", "piso", "zona de trabajo"],
+  // Opcional: costo directo presupuestado por unidad (valor ganado)
+  cost: ["costo unitario", "costo unitario presupuestado", "costo presupuestado", "costo directo unitario", "presupuesto unitario"],
 } as const;
 
 export const FRONT_COLUMNS = {
@@ -54,8 +56,21 @@ const text = (v: unknown) => {
 };
 const value = (v: unknown) => (typeof v === "object" && v !== null && !(v instanceof Date) && "result" in v ? (v as { result: unknown }).result : v);
 
+/** Costo unitario: vacío = sin costo; texto que no es número o negativo = aviso y sin costo. */
+let warnCost: ((where: string, message: string) => void) | null = null;
+function unitCost(v: unknown, where: string, code: string): number | null {
+  if (v == null || v === "") return null;
+  const n = toNumber(typeof v === "string" ? v.replace(/[$\s]/g, "") : v);
+  if (n == null || n < 0) {
+    warnCost?.(where, `${code}: el costo unitario "${String(v)}" no es un número.`);
+    return null;
+  }
+  return n;
+}
+
 export function fromExcelRows(sheets: { actividades: Row[]; frentes?: Row[] | null }): ImportPlan {
   const plan: ImportPlan = { source: "excel", projectName: null, fronts: [], activities: [], warnings: [], errors: [] };
+  warnCost = (where, message) => plan.warnings.push({ where, message });
   const [header, ...rows] = sheets.actividades;
   if (!header) {
     plan.errors.push({ message: "La hoja Actividades está vacía." });
@@ -117,6 +132,7 @@ export function fromExcelRows(sheets: { actividades: Row[]; frentes?: Row[] | nu
       externalRef: null,
       ...(col.group !== undefined ? { workGroup: text(get("group")) || null } : {}),
       ...(col.zone !== undefined ? { subfield: text(get("zone")) || null } : {}),
+      ...(col.cost !== undefined ? { budgetUnitCost: unitCost(value(get("cost")), where, code) } : {}),
     });
   });
   plan.fronts = [...fronts.values()];
