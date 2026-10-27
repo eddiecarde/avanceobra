@@ -56,6 +56,7 @@ const GROUPS: { label: string; pages: Page[] }[] = [
       { href: "/planos", label: "Planos", icon: "map" },
       { href: "/importar", label: "Programación", icon: "upload" },
       { href: "/equipo", label: "Equipo", icon: "users" },
+      { href: "/empresa", label: "Empresa", icon: "users" },
     ],
   },
 ];
@@ -90,9 +91,18 @@ function Logo({ dark }: { dark?: boolean }) {
 export function AppShell({ children }: { children: ReactNode }) {
   const { loading, session, isAdmin, memberships, signOut, isPlatformAdmin, suspended } = useSession();
   // El dueño de la plataforma ve además el panel de empresas
-  const groups = isPlatformAdmin
-    ? GROUPS.map((g) => (g.label === "Ajustes" ? { ...g, pages: [...g.pages, { href: "/dueno", label: "Panel del dueño", icon: "gauge" as const }] } : g))
-    : GROUPS;
+  const groups = GROUPS.map((g) =>
+    g.label === "Ajustes"
+      ? {
+          ...g,
+          // Empresa: solo el administrador; Panel del dueño: solo el dueño de la plataforma
+          pages: [
+            ...g.pages.filter((p) => p.href !== "/empresa" || isAdmin),
+            ...(isPlatformAdmin ? [{ href: "/dueno", label: "Panel del dueño", icon: "gauge" as const }] : []),
+          ],
+        }
+      : g,
+  );
   const path = usePathname();
   const router = useRouter();
   const isLogin = path === "/login";

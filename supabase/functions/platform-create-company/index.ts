@@ -54,14 +54,15 @@ Deno.serve(async (req) => {
     if (created) await db.auth.admin.deleteUser(userId!);
     return reply(500, { error: message });
   };
+  // Administrador de la empresa: entra solo a esta obra y a las que cree después
+  const { error: e4 } = await db.from("org_admins").insert({ org_id: org.id, user_id: userId, created_by: caller.user.id });
+  if (e4) return undo(e4.message);
   const { data: project, error: e3 } = await db
     .from("projects")
     .insert({ org_id: org.id, code: c.project_code, name: c.project_name, start_date: c.start, contract_end_date: c.end })
     .select("id")
     .single();
   if (e3 || !project) return undo(e3?.message ?? "No se pudo crear la obra.");
-  const { error: e4 } = await db.from("memberships").insert({ user_id: userId, project_id: project.id, org_id: org.id, role: "admin", member_name: c.admin_name });
-  if (e4) return undo(e4.message);
 
   return reply(200, { status: created ? "created" : "added", org_id: org.id, project_id: project.id, user_id: userId });
 });
