@@ -1698,14 +1698,71 @@ function subcontractorScores(input) {
     };
   });
 }
+
+// packages/engine/src/compliance.ts
+var COMPANY_DOCS = {
+  pila: "Planilla de seguridad social (PILA)",
+  arl_empresa: "Afiliaci\xF3n ARL de la empresa",
+  poliza: "P\xF3liza",
+  sg_sst: "SG-SST (est\xE1ndares m\xEDnimos)",
+  camara_comercio: "C\xE1mara de comercio"
+};
+var WORKER_DOCS = {
+  arl: "Afiliaci\xF3n ARL",
+  eps: "Afiliaci\xF3n EPS",
+  pension: "Afiliaci\xF3n a pensi\xF3n",
+  examen_medico: "Examen m\xE9dico ocupacional",
+  induccion: "Inducci\xF3n SST de la obra",
+  alturas: "Curso de trabajo seguro en alturas",
+  espacios_confinados: "Curso de espacios confinados",
+  licencia: "Licencia de conducci\xF3n",
+  certificado_operador: "Certificado de operador de equipo"
+};
+var REQUIRED_COMPANY_DOCS = ["pila"];
+var REQUIRED_WORKER_DOCS = ["arl", "eps", "examen_medico", "induccion"];
+function docState(expiresOn, today, soonDays = 15) {
+  if (!expiresOn) return "ok";
+  if (expiresOn < today) return "expired";
+  return expiresOn <= addDays(today, soonDays) ? "soon" : "ok";
+}
+function latestByType(docs) {
+  const out = /* @__PURE__ */ new Map();
+  for (const d of docs) {
+    if (!out.has(d.docType)) out.set(d.docType, d.expiresOn);
+    else {
+      const prev = out.get(d.docType);
+      if (prev !== null && (d.expiresOn === null || d.expiresOn > prev)) out.set(d.docType, d.expiresOn);
+    }
+  }
+  return out;
+}
+function evaluate2(required, docs, today, soonDays) {
+  const latest = latestByType(docs);
+  const missing = required.filter((t) => !latest.has(t));
+  const expired = required.filter((t) => latest.has(t) && docState(latest.get(t), today, soonDays) === "expired");
+  const soon = required.filter((t) => latest.has(t) && docState(latest.get(t), today, soonDays) === "soon").map((t) => ({ docType: t, expiresOn: latest.get(t) }));
+  return { status: missing.length || expired.length ? "blocked" : soon.length ? "soon" : "ok", missing, expired, soon };
+}
+function workerCompliance(worker, docs, today, soonDays = 15) {
+  const required = [...REQUIRED_WORKER_DOCS, ...worker.worksAtHeight ? ["alturas"] : []];
+  return evaluate2(required, docs, today, soonDays);
+}
+function companyCompliance(docs, today, soonDays = 15) {
+  return evaluate2(REQUIRED_COMPANY_DOCS, docs, today, soonDays);
+}
+var docLabel = (t) => COMPANY_DOCS[t] ?? WORKER_DOCS[t] ?? t;
 export {
+  COMPANY_DOCS,
   DEFAULT_SENSITIVITY,
   DEFAULT_SHIFT_RULES,
   DEFAULT_THRESHOLDS,
   LIGHT_LABEL,
   MIN_SAMPLES_FOR_RELIABLE,
   PROJECT_SENSITIVITY,
+  REQUIRED_COMPANY_DOCS,
+  REQUIRED_WORKER_DOCS,
   SCENARIO_LABEL,
+  WORKER_DOCS,
   ZONE_COLORS,
   activityControl,
   activityDailyOutput,
@@ -1717,6 +1774,7 @@ export {
   bottleneck,
   claimableDays,
   colombianHolidays,
+  companyCompliance,
   compareRates,
   compareScenarios,
   controlSummary,
@@ -1725,6 +1783,8 @@ export {
   criticalPath,
   describePlan,
   diffDays,
+  docLabel,
+  docState,
   durationDays,
   earnedValue,
   easterSunday,
@@ -1784,6 +1844,7 @@ export {
   weightedProgress,
   weighting,
   workdayCounter,
+  workerCompliance,
   workingDaysBetween,
   zoneStatus
 };

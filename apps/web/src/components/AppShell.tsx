@@ -46,6 +46,7 @@ const GROUPS: { label: string; pages: Page[] }[] = [
       { href: "/calidad", label: "Calidad", icon: "check" },
       { href: "/control", label: "Ensayos y restricciones", icon: "flask" },
       { href: "/materiales", label: "Materiales", icon: "box" },
+      { href: "/sst", label: "Seguridad social y SST", icon: "hardhat" },
       { href: "/personal", label: "Personal, equipos y lluvia", icon: "hardhat" },
       { href: "/formatos", label: "Formatos", icon: "form" },
     ],
