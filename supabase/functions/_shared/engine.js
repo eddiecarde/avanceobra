@@ -1751,6 +1751,49 @@ function companyCompliance(docs, today, soonDays = 15) {
   return evaluate2(REQUIRED_COMPANY_DOCS, docs, today, soonDays);
 }
 var docLabel = (t) => COMPANY_DOCS[t] ?? WORKER_DOCS[t] ?? t;
+
+// packages/engine/src/settlement.ts
+var money2 = (x) => Math.round(x * 100) / 100;
+function contractSettlement(input) {
+  const priced = input.lines.filter((l) => l.unitPrice != null);
+  const finalValue = money2(priced.reduce((t2, l) => t2 + l.contractQty * l.unitPrice, 0));
+  const executedValue = money2(priced.reduce((t2, l) => t2 + l.approvedQty * l.unitPrice, 0));
+  const last = [...input.certificates].sort((a, b) => b.number - a.number)[0];
+  const billedDirect = money2(last?.cumulativeAmount ?? 0);
+  const pendingDirect = money2(executedValue - billedDirect);
+  const t = input.terms ?? {};
+  const aiuPct = (t.adminPct ?? 0) + (t.contingencyPct ?? 0) + (t.utilityPct ?? 0);
+  const pendingAiu = money2(pendingDirect * aiuPct);
+  const vatPct = t.vatMode && t.vatMode !== "none" ? t.vatPct ?? 0.19 : 0;
+  const vatBase = t.vatMode === "utility" ? pendingDirect * (t.utilityPct ?? 0) : t.vatMode === "full" ? pendingDirect + pendingAiu : 0;
+  const pendingVat = money2(vatBase * vatPct);
+  const pendingGross = money2(pendingDirect + pendingAiu + pendingVat);
+  const retentionToReturn = money2(input.certificates.reduce((s, c) => s + c.retentionAmount, 0));
+  const advanceAmortized = money2(input.certificates.reduce((s, c) => s + c.advanceAmount, 0));
+  const advancePending = money2(Math.max(0, input.advanceGiven - advanceAmortized));
+  const paidNet = money2(input.certificates.reduce((s, c) => s + c.netAmount, 0));
+  const balance = money2(pendingGross + retentionToReturn - advancePending);
+  return {
+    initialValue: money2(finalValue - input.changeOrdersAmount),
+    changeOrdersAmount: money2(input.changeOrdersAmount),
+    finalValue,
+    executedValue,
+    notExecuted: money2(Math.max(0, finalValue - executedValue)),
+    billedDirect,
+    certificates: input.certificates.length,
+    pendingDirect,
+    pendingAiu,
+    pendingVat,
+    pendingGross,
+    retentionToReturn,
+    advanceGiven: money2(input.advanceGiven),
+    advanceAmortized,
+    advancePending,
+    paidNet,
+    balance,
+    totalPaid: money2(paidNet + balance + input.advanceGiven)
+  };
+}
 export {
   COMPANY_DOCS,
   DEFAULT_SENSITIVITY,
@@ -1777,6 +1820,7 @@ export {
   companyCompliance,
   compareRates,
   compareScenarios,
+  contractSettlement,
   controlSummary,
   costControl,
   crewOutput,

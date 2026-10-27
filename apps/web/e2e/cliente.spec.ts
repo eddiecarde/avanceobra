@@ -96,3 +96,38 @@ test("el administrador da acceso al portal a un cliente desde Equipo", async ({ 
   expect(calls[0]).toMatchObject({ project_id: PROJECT_ID, role: "client", name: "Laura Gómez", company: "Helios", email: "laura@helios.co" });
   await expect(page.getByRole("listitem").filter({ hasText: "Laura Gómez · Helios" })).toBeVisible();
 });
+
+test("el cliente aprueba en su portal una orden de cambio", async ({ page }) => {
+  const { db } = clientDb();
+  const base = db.rpc.client_project!;
+  const order = {
+    id: "co1",
+    number: 1,
+    title: "Pilotes adicionales sector norte",
+    description: "Ampliación pedida por el cliente",
+    reason: "cliente",
+    days_extension: 5,
+    status: "enviada",
+    amount: 800_000,
+    decided_name: null,
+    decided_at: null,
+    decision_note: null,
+    items: [{ activity: "BA-HIN · Hincado de pilotes", unit: "pilotes", delta_qty: 10, new_unit_price: null, is_new: false }],
+  };
+  db.rpc.client_project = (args) => ({ ...(base(args) as object), change_orders: [order], settlement: null });
+  const calls: Record<string, unknown>[] = [];
+  db.rpc.client_decide_change_order = (args) => {
+    calls.push(args);
+    Object.assign(order, { status: "aprobada", decided_name: "Laura Gómez (Helios)", decided_at: `${day(0)}T15:00:00Z` });
+    return null;
+  };
+  await mockSupabase(page, db);
+  await page.goto("/cliente");
+  await page.getByRole("tab", { name: "Órdenes de cambio (1 por revisar)" }).click();
+  await expect(page.getByRole("heading", { name: "Orden de cambio N° 1 · Pilotes adicionales sector norte" })).toBeVisible();
+  await expect(page.getByText("Prórroga solicitada: 5 días.")).toBeVisible();
+  page.once("dialog", (d) => void d.accept());
+  await page.getByRole("button", { name: "Aprobar orden de cambio" }).click();
+  await expect(page.getByText(/Aprobada.*por Laura Gómez \(Helios\)/)).toBeVisible();
+  expect(calls).toEqual([{ p_id: "co1", p_approve: true, p_note: "" }]);
+});

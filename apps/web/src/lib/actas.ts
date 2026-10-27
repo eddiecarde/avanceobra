@@ -1,6 +1,6 @@
 "use client";
 
-import { paymentCertificate, type CertificateLine, type CertificateTerms, type CertificateTotals, type VatMode } from "@avanceobra/engine";
+import { paymentCertificate, type CertificateLine, type CertificateTerms, type CertificateTotals, type SettlementTotals, type VatMode } from "@avanceobra/engine";
 import { fetchAll } from "./dashboard";
 import { supabase } from "./supabase";
 
@@ -60,6 +60,20 @@ export interface ActasData {
   certificates: Certificate[];
   /** Contratos de los subcontratistas: condiciones de pago para su primera acta. */
   subcontracts: Subcontract[];
+  /** Liquidaciones emitidas o anuladas. */
+  settlements: Settlement[];
+  /** Órdenes de cambio aprobadas: su valor por contrato. */
+  changeOrders: { company_id: string | null; amount: number }[];
+}
+
+export interface Settlement {
+  id: string;
+  company_id: string | null;
+  status: "emitida" | "anulada";
+  totals: SettlementTotals;
+  notes: string | null;
+  issued_at: string;
+  void_reason: string | null;
 }
 
 export interface Subcontract {
@@ -81,7 +95,7 @@ export interface Subcontract {
 }
 
 export async function loadActas(projectId: string): Promise<ActasData> {
-  const [p, a, e, c, cs, sc] = await Promise.all([
+  const [p, a, e, c, cs, sc, st, co] = await Promise.all([
     supabase.from("projects").select("name, client_name, contractor_name, contract_code, report_signers, start_date").eq("id", projectId).single(),
     fetchAll((x, y) =>
       supabase
@@ -98,6 +112,8 @@ export async function loadActas(projectId: string): Promise<ActasData> {
     supabase.from("project_companies").select("id, name, kind").eq("project_id", projectId).order("kind").order("name"),
     supabase.from("payment_certificates").select("*").eq("project_id", projectId).order("issued_at", { ascending: false }),
     supabase.from("subcontracts").select("*").eq("project_id", projectId),
+    supabase.from("settlements").select("id, company_id, status, totals, notes, issued_at, void_reason").eq("project_id", projectId).order("issued_at", { ascending: false }),
+    supabase.from("change_orders").select("company_id, amount").eq("project_id", projectId).eq("status", "aprobada"),
   ]);
   for (const r of [p, a, e, c, cs]) if (r.error) throw new Error(r.error.message);
   return {
@@ -127,6 +143,8 @@ export async function loadActas(projectId: string): Promise<ActasData> {
       utility_pct: Number(x.utility_pct),
       vat_pct: Number(x.vat_pct),
     })),
+    settlements: (st.data ?? []) as Settlement[],
+    changeOrders: ((co.data ?? []) as { company_id: string | null; amount: number | null }[]).map((x) => ({ company_id: x.company_id, amount: Number(x.amount ?? 0) })),
   };
 }
 
@@ -225,6 +243,27 @@ export function totalsRows(t: CertificateTotals): [string, number][] {
     ["NETO A PAGAR", t.netAmount],
     ["Acumulado a la fecha (costo directo)", t.cumulativeAmount],
     ["Saldo del contrato", t.balanceAmount],
+  ];
+}
+
+/** Renglones de la liquidación final (para pantalla e impresión). */
+export function settlementRows(t: SettlementTotals): [string, number, boolean?][] {
+  return [
+    ["Valor inicial del contrato", t.initialValue],
+    ["Órdenes de cambio aprobadas", t.changeOrdersAmount],
+    ["Valor final del contrato", t.finalValue, true],
+    ["Ejecutado y aprobado", t.executedValue],
+    ["No ejecutado (no se paga)", t.notExecuted],
+    [`Facturado en ${t.certificates} acta(s) (costo directo)`, t.billedDirect],
+    ["Pendiente por facturar (costo directo)", t.pendingDirect],
+    ...(t.pendingAiu ? ([["AIU de lo pendiente", t.pendingAiu]] as [string, number][]) : []),
+    ...(t.pendingVat ? ([["IVA de lo pendiente", t.pendingVat]] as [string, number][]) : []),
+    ["Retención acumulada que se devuelve", t.retentionToReturn],
+    ["Anticipo por amortizar (se descuenta)", -t.advancePending],
+    ["SALDO A PAGAR EN LA LIQUIDACIÓN", t.balance, true],
+    ["Pagado en actas (neto)", t.paidNet],
+    ["Anticipo entregado", t.advanceGiven],
+    ["Total recibido con la liquidación", t.totalPaid, true],
   ];
 }
 

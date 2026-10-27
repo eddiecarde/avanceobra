@@ -3,13 +3,24 @@
 import { useEffect, useState } from "react";
 import { DashboardView } from "@/components/dash/DashboardView";
 import { Badge, Button, Card, cx, Field, Select, Textarea } from "@/components/ui";
-import { cop, qty, totalsRows } from "@/lib/actas";
-import { CLIENT_STATUS, decideCertificate, loadClientProjects, loadClientView, type ClientCertificate, type ClientProject, type ClientView } from "@/lib/cliente";
+import { cop, qty, settlementRows, totalsRows } from "@/lib/actas";
+import {
+  CLIENT_STATUS,
+  decideCertificate,
+  decideChangeOrder,
+  loadClientProjects,
+  loadClientView,
+  type ClientCertificate,
+  type ClientChangeOrder,
+  type ClientProject,
+  type ClientView,
+} from "@/lib/cliente";
 import { useSession } from "@/lib/session";
 
-type Tab = "actas" | "avance" | "entregas";
+type Tab = "actas" | "cambios" | "avance" | "entregas";
 const TABS: { key: Tab; label: string }[] = [
   { key: "actas", label: "Actas de cobro" },
+  { key: "cambios", label: "Órdenes de cambio" },
   { key: "avance", label: "Avance de obra" },
   { key: "entregas", label: "Entregas del punch list" },
 ];
@@ -100,6 +111,9 @@ export default function Cliente() {
                 >
                   {t.label}
                   {t.key === "actas" && pending ? ` (${pending} por revisar)` : ""}
+                  {t.key === "cambios" && data?.changeOrders.some((c) => c.status === "enviada")
+                    ? ` (${data.changeOrders.filter((c) => c.status === "enviada").length} por revisar)`
+                    : ""}
                 </button>
               ))}
             </div>
@@ -111,6 +125,12 @@ export default function Cliente() {
               <DashboardView data={data.dash} error={null} note="Datos al momento de abrir la página · sin costos internos del contratista" />
             ) : tab === "entregas" ? (
               <Handovers data={data} />
+            ) : tab === "cambios" ? (
+              data.changeOrders.length ? (
+                data.changeOrders.map((c) => <ChangeOrderReview key={c.id} order={c} onDecided={() => setVersion((v) => v + 1)} />)
+              ) : (
+                <Card className="text-zinc-500">No hay órdenes de cambio.</Card>
+              )
             ) : (
               <>
                 <Card>
@@ -152,6 +172,24 @@ export default function Cliente() {
                   )}
                 </Card>
                 {open ? <CertificateReview key={open.id} cert={open} onDecided={() => setVersion((v) => v + 1)} /> : null}
+                {data.settlement ? (
+                  <Card>
+                    <h2 className="text-lg font-bold">Liquidación final del contrato</h2>
+                    <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                      Emitida el {new Date(data.settlement.issued_at).toLocaleDateString("es-CO", { dateStyle: "long" })}.
+                    </p>
+                    <table className="mt-2 ml-auto text-sm">
+                      <tbody>
+                        {settlementRows(data.settlement.totals).map(([label, v, strong]) => (
+                          <tr key={label} className={strong ? "border-y border-zinc-300 font-extrabold dark:border-zinc-700" : ""}>
+                            <td className="py-0.5 pr-6">{label}</td>
+                            <td className="text-right tabular-nums">{cop(v)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </Card>
+                ) : null}
               </>
             )}
           </>
@@ -249,6 +287,81 @@ function CertificateReview({ cert, onDecided }: { cert: ClientCertificate; onDec
         <p className="mt-3 text-sm">
           <b>{CLIENT_STATUS[cert.client_status].label}</b> por {cert.client_decided_name} el {new Date(cert.client_decided_at).toLocaleString("es-CO", { dateStyle: "long", timeStyle: "short" })}
           {cert.client_note ? `: ${cert.client_note}` : "."}
+        </p>
+      ) : null}
+    </Card>
+  );
+}
+
+/** Orden de cambio del contrato: sus renglones, su valor y la decisión del cliente. */
+function ChangeOrderReview({ order, onDecided }: { order: ClientChangeOrder; onDecided: () => void }) {
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const LABEL = { enviada: "Por revisar", aprobada: "Aprobada", rechazada: "Rechazada" } as const;
+  const TONE = { enviada: "amber", aprobada: "green", rechazada: "red" } as const;
+
+  async function decide(approve: boolean) {
+    if (!approve && note.trim().length < 5) return setError("Escribe por qué se rechaza.");
+    if (approve && !window.confirm(`¿Aprobar la orden de cambio N° ${order.number} por ${cop(order.amount ?? 0)}? Se aplica al contrato.`)) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await decideChangeOrder(order.id, approve, note);
+      onDecided();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card>
+      <div className="flex flex-wrap items-start gap-3">
+        <h2 className="mr-auto text-lg font-bold">
+          Orden de cambio N° {order.number} · {order.title}
+        </h2>
+        <Badge tone={TONE[order.status]}>{LABEL[order.status]}</Badge>
+        <span className="text-lg font-extrabold tabular-nums">{cop(order.amount ?? 0)}</span>
+      </div>
+      {order.description ? <p className="text-sm text-zinc-600 dark:text-zinc-400">{order.description}</p> : null}
+      {order.days_extension ? <p className="text-sm">Prórroga solicitada: {order.days_extension} días.</p> : null}
+      <table className="mt-2 w-full text-left text-sm">
+        <tbody>
+          {order.items.map((i, k) => (
+            <tr key={k} className="border-t border-zinc-100 dark:border-zinc-800">
+              <td className="py-1">
+                {i.activity} {i.is_new ? <Badge tone="blue">Nueva</Badge> : null}
+              </td>
+              <td className="text-right tabular-nums">
+                {i.delta_qty > 0 ? "+" : ""}
+                {qty(Number(i.delta_qty))} {i.unit}
+              </td>
+              <td className="text-right tabular-nums">{i.new_unit_price != null ? cop(Number(i.new_unit_price)) : "precio del contrato"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {order.status === "enviada" ? (
+        <div className="mt-3 space-y-2">
+          <Field label="Observaciones" hint="(obligatorias si se rechaza)">
+            <Textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
+          </Field>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="primary" disabled={busy} onClick={() => void decide(true)}>
+              Aprobar orden de cambio
+            </Button>
+            <Button disabled={busy} onClick={() => void decide(false)}>
+              Rechazar
+            </Button>
+            {error ? <span className="font-semibold text-red-700 dark:text-red-400">{error}</span> : null}
+          </div>
+        </div>
+      ) : order.decided_at ? (
+        <p className="mt-2 text-sm">
+          <b>{LABEL[order.status]}</b> por {order.decided_name} el {new Date(order.decided_at).toLocaleDateString("es-CO")}
+          {order.decision_note ? `: ${order.decision_note}` : "."}
         </p>
       ) : null}
     </Card>

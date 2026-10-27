@@ -1,6 +1,6 @@
 "use client";
 
-import type { CertificateTerms, VatMode } from "@avanceobra/engine";
+import { contractSettlement, type CertificateTerms, type VatMode } from "@avanceobra/engine";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Badge, Button, Card, cx, downloadBlob, Field, Input, Select } from "@/components/ui";
@@ -14,6 +14,7 @@ import {
   qty,
   readPricesXlsx,
   sameTarget,
+  settlementRows,
   type ActasData,
   type Certificate,
   type CertificateTarget,
@@ -383,9 +384,157 @@ export default function Actas() {
               </table>
             )}
           </Card>
+
+          <SettlementCard
+            key={targetKey}
+            projectId={projectId}
+            data={data}
+            target={target}
+            targetName={targetName(target.kind === "cliente" ? null : target.companyId)}
+            canIssue={canIssue}
+            onChanged={() => setVersion((v) => v + 1)}
+          />
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * Liquidación final del contrato elegido: valor final con las órdenes de cambio, lo pendiente por
+ * facturar, la retención que se devuelve y el anticipo por amortizar. Al emitirla se cierra el contrato.
+ */
+function SettlementCard({
+  projectId,
+  data,
+  target,
+  targetName,
+  canIssue,
+  onChanged,
+}: {
+  projectId: string;
+  data: ActasData;
+  target: CertificateTarget;
+  targetName: string;
+  canIssue: boolean;
+  onChanged: () => void;
+}) {
+  const companyId = target.kind === "cliente" ? null : target.companyId;
+  const issued = data.settlements.find((x) => x.company_id === companyId && x.status === "emitida");
+  const sub = companyId ? data.subcontracts.find((x) => x.company_id === companyId) : undefined;
+  const [open, setOpen] = useState(false);
+  const [advance, setAdvance] = useState(String(sub?.advance_amount ?? 0));
+  const [notes, setNotes] = useState("");
+  const [msg, setMsg] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+
+  const totals = useMemo(() => {
+    const approved = new Map<string, number>();
+    for (const e of data.approved) approved.set(e.activityId, (approved.get(e.activityId) ?? 0) + e.quantity);
+    const acts = companyId ? data.activities.filter((a) => a.companyId === companyId) : data.activities;
+    return contractSettlement({
+      lines: acts.map((a) => ({ contractQty: a.contractQty, unitPrice: companyId ? a.subcontractUnitPrice : a.unitPrice, approvedQty: approved.get(a.id) ?? 0 })),
+      certificates: data.certificates
+        .filter((c) => c.status === "emitida" && sameTarget(c, target))
+        .map((c) => ({
+          number: c.number,
+          cumulativeAmount: Number(c.totals.cumulativeAmount ?? 0),
+          retentionAmount: Number(c.totals.retentionAmount ?? 0),
+          advanceAmount: Number(c.totals.advanceAmount ?? 0),
+          netAmount: Number(c.totals.netAmount ?? 0),
+        })),
+      changeOrdersAmount: data.changeOrders.filter((c) => c.company_id === companyId).reduce((t, c) => t + c.amount, 0),
+      advanceGiven: Number(advance.replace(/[$\s.]/g, "").replace(",", ".")) || 0,
+      terms: lastTerms(data, target),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, companyId, advance]);
+
+  async function issue() {
+    if (!window.confirm(`Se emitirá la liquidación del contrato con ${targetName} por un saldo de ${cop(totals.balance)}. Después no se emiten más actas para este contrato. ¿Continuar?`)) return;
+    const { error } = await supabase.from("settlements").insert({
+      project_id: projectId,
+      company_id: companyId,
+      totals,
+      notes: notes.trim() || null,
+      issued_by: (await supabase.auth.getUser()).data.user?.id,
+    });
+    if (error) return setMsg({ tone: "error", text: error.message });
+    setMsg({ tone: "ok", text: "Liquidación emitida: el contrato quedó cerrado." });
+    onChanged();
+  }
+
+  async function voidIt() {
+    if (!issued) return;
+    const reason = window.prompt("¿Por qué se anula la liquidación?");
+    if (!reason) return;
+    const { error } = await supabase.from("settlements").update({ status: "anulada", void_reason: reason }).eq("id", issued.id);
+    if (error) return setMsg({ tone: "error", text: error.message });
+    setMsg({ tone: "ok", text: "Liquidación anulada: el contrato vuelve a recibir actas." });
+    onChanged();
+  }
+
+  const rows = settlementRows(issued?.totals ?? totals);
+  return (
+    <Card>
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="mr-auto">
+          <h2 className="text-lg font-bold">Liquidación del contrato</h2>
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            {issued
+              ? `Emitida el ${new Date(issued.issued_at).toLocaleDateString("es-CO")}: el contrato con ${targetName} está cerrado.`
+              : "Al terminar el contrato: valor final con las órdenes de cambio, lo pendiente por facturar, la retención que se devuelve y el anticipo por amortizar."}
+          </p>
+        </div>
+        {issued ? (
+          <>
+            <Link href={`/actas/liquidacion?id=${issued.id}`} className="inline-flex rounded-lg px-2.5 py-1 text-sm font-semibold text-blue-700 hover:underline dark:text-blue-400">
+              Ver / PDF
+            </Link>
+            {canIssue ? (
+              <Button size="sm" variant="ghost" onClick={() => void voidIt()}>
+                Anular
+              </Button>
+            ) : null}
+          </>
+        ) : (
+          <Button onClick={() => setOpen(!open)} aria-expanded={open}>
+            {open ? "Cerrar" : "Preparar liquidación"}
+          </Button>
+        )}
+      </div>
+      {issued || open ? (
+        <>
+          {!issued ? (
+            <div className="mt-3 grid gap-3 md:grid-cols-3">
+              <Field label="Anticipo entregado" hint="($)">
+                <Input inputMode="numeric" value={advance} onChange={(e) => setAdvance(e.target.value)} />
+              </Field>
+              <Field label="Observaciones" className="md:col-span-2">
+                <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="p. ej. Se devuelve la retención contra póliza de estabilidad" />
+              </Field>
+            </div>
+          ) : null}
+          <table className="mt-3 ml-auto text-sm">
+            <tbody>
+              {rows.map(([label, v, strong]) => (
+                <tr key={label} className={strong ? "border-y border-zinc-300 font-extrabold dark:border-zinc-700" : ""}>
+                  <td className="py-0.5 pr-6">{label}</td>
+                  <td className={cx("text-right tabular-nums", v < 0 && "text-red-700 dark:text-red-400")}>{cop(v)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!issued && canIssue ? (
+            <div className="mt-3 flex justify-end">
+              <Button variant="primary" onClick={() => void issue()}>
+                Emitir acta de liquidación
+              </Button>
+            </div>
+          ) : null}
+        </>
+      ) : null}
+      {msg ? <p className={cx("mt-2 font-semibold", msg.tone === "ok" ? "text-green-700 dark:text-green-400" : "text-red-700 dark:text-red-400")}>{msg.text}</p> : null}
+    </Card>
   );
 }
 

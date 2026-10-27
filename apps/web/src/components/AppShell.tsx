@@ -33,6 +33,7 @@ const GROUPS: { label: string; pages: Page[] }[] = [
     pages: [
       { href: "/actas", label: "Actas de cobro", icon: "receipt" },
       { href: "/subcontratistas", label: "Subcontratistas", icon: "users" },
+      { href: "/cambios", label: "Órdenes de cambio", icon: "edit" as IconName },
       { href: "/valor-ganado", label: "Valor ganado (EVM)", icon: "trend" },
       { href: "/costos", label: "Costos y productividad", icon: "coins" },
       { href: "/simulador", label: "Acelerar vs. multa", icon: "scale" },
