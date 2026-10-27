@@ -42,3 +42,24 @@ export const CORS = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
+
+export interface ResetRequest {
+  user_id: string;
+  /** Obra desde la que se pide (el dueño de la plataforma no la necesita). */
+  project_id: string | null;
+  password: string;
+}
+
+/** Valida la solicitud de restablecer una contraseña. */
+export function validateReset(body: unknown): { ok: true; value: ResetRequest } | { ok: false; errors: string[] } {
+  const b = (body ?? {}) as Record<string, unknown>;
+  const errors: string[] = [];
+  const user = String(b.user_id ?? "");
+  const project = b.project_id == null || b.project_id === "" ? null : String(b.project_id);
+  const password = String(b.password ?? "");
+  if (!/^[0-9a-f-]{36}$/i.test(user)) errors.push("Falta la persona.");
+  if (project !== null && !/^[0-9a-f-]{36}$/i.test(project)) errors.push("La obra no es válida.");
+  if (password.length < 10 || !/[A-Za-z]/.test(password) || !/\d/.test(password))
+    errors.push("La contraseña temporal debe tener al menos 10 caracteres, con letras y números.");
+  return errors.length ? { ok: false, errors } : { ok: true, value: { user_id: user, project_id: project, password } };
+}

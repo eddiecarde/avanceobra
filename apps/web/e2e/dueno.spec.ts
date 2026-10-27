@@ -6,7 +6,7 @@ function ownerDb() {
   const db = buildDb();
   db.tables.platform_admins = [{ user_id: USER.id }];
   const companies = [
-    { id: "o1", name: "Constructora Prueba", tax_id: "900111222-3", created_at: `${day(-60)}T12:00:00Z`, suspended_at: null, suspended_reason: null, projects: 2, project_names: ["Parque Solar Prueba", "Pivijay"], users: 4, admins: ["Eddie"], last_sign_in: `${day(0)}T12:00:00Z`, last_entry: null, entries_30d: 45 },
+    { id: "o1", name: "Constructora Prueba", tax_id: "900111222-3", created_at: `${day(-60)}T12:00:00Z`, suspended_at: null, suspended_reason: null, projects: 2, project_names: ["Parque Solar Prueba", "Pivijay"], users: 4, admins: ["Eddie"], admin_users: [{ user_id: "u-admin-1", name: "Carolina Ruiz", email: "carolina@prueba.co" }], last_sign_in: `${day(0)}T12:00:00Z`, last_entry: null, entries_30d: 45 },
   ];
   const calls: { fn: string; args: Record<string, unknown> }[] = [];
   db.rpc.platform_companies = () => companies;
@@ -71,4 +71,23 @@ test("la gente de una empresa suspendida ve el aviso y no entra", async ({ page 
   await page.goto("/dashboard");
   await expect(page.getByRole("heading", { name: "Tu empresa está suspendida" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Dashboard" })).toHaveCount(0);
+});
+
+test("panel del dueño: restablece la contraseña del administrador de una empresa", async ({ page }) => {
+  const { db, calls } = ownerDb();
+  db.functions = {
+    ...db.functions,
+    "team-reset-password": (body) => {
+      calls.push({ fn: "reset", args: body });
+      return [200, { status: "reset" }];
+    },
+  };
+  await mockSupabase(page, db);
+  await page.goto("/dueno");
+  page.once("dialog", (d) => void d.accept());
+  await page.getByRole("button", { name: "Restablecer contraseña de Carolina Ruiz" }).click();
+  await expect(page.getByText("Contraseña de Carolina Ruiz restablecida. Envíale el mensaje de abajo.")).toBeVisible();
+  await expect(page.getByText(/carolina@prueba.co y la contraseña temporal/)).toBeVisible();
+  expect(calls.find((c) => c.fn === "reset")?.args).toMatchObject({ user_id: "u-admin-1" });
+  expect((calls.find((c) => c.fn === "reset")?.args as Record<string, unknown>).project_id).toBeUndefined();
 });

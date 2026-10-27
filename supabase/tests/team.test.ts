@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateNewMember } from "../functions/_shared/team.ts";
+import { validateNewMember, validateReset } from "../functions/_shared/team.ts";
 
 const ok = { project_id: "53f66974-0cdb-45f8-a1e0-20d708ab02a5", email: " Ana.Perez@Obra.CO ", name: "Ana Pérez", role: "resident", password: "Obra2026segura" };
 
@@ -25,5 +25,17 @@ describe("crear usuario del equipo", () => {
     // La empresa solo aplica al cliente
     const member = validateNewMember({ ...ok, company: "X" });
     expect(member.ok && member.value.company).toBeNull();
+  });
+});
+
+describe("restablecer contraseña", () => {
+  const id = "53f66974-0cdb-45f8-a1e0-20d708ab02a5";
+  it("acepta persona, obra y contraseña temporal segura; la obra es opcional (dueño)", () => {
+    expect(validateReset({ user_id: id, project_id: id, password: "Obra2026segura" })).toEqual({ ok: true, value: { user_id: id, project_id: id, password: "Obra2026segura" } });
+    expect(validateReset({ user_id: id, password: "Obra2026segura" }).ok).toBe(true);
+  });
+  it("rechaza contraseñas débiles o sin persona", () => {
+    const r = validateReset({ user_id: "x", password: "123" });
+    expect(!r.ok && r.errors).toEqual(["Falta la persona.", "La contraseña temporal debe tener al menos 10 caracteres, con letras y números."]);
   });
 });

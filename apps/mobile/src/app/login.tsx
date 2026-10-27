@@ -11,7 +11,8 @@ type Method = "code" | "password";
  * Se requiere señal solo la primera vez; después la sesión queda guardada en el teléfono.
  */
 export default function Login() {
-  const [method, setMethod] = useState<Method>("code");
+  // La contraseña primero: el código por correo solo llega si el proyecto tiene correo configurado
+  const [method, setMethod] = useState<Method>("password");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
@@ -49,8 +50,8 @@ export default function Login() {
         {!isConfigured ? <Body>⚠ Falta configurar Supabase y PowerSync (ver .env.example).</Body> : null}
         <Chips
           options={[
-            { value: "code", label: "Código por correo" },
             { value: "password", label: "Contraseña" },
+            { value: "code", label: "Código por correo" },
           ]}
           value={method}
           onChange={(m) => {
@@ -80,6 +81,7 @@ export default function Login() {
               disabled={!normalized.includes("@") || password.length < 6}
               onPress={signInWithPassword}
             />
+            <Body muted>¿Olvidaste tu contraseña? Pídele al administrador de tu obra que te genere una temporal (en la web: Equipo → Restablecer contraseña).</Body>
           </>
         ) : sent ? (
           <>

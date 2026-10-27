@@ -40,6 +40,13 @@ export default function Login() {
             {busy ? "Entrando…" : "Entrar"}
           </Button>
         </form>
+        <details className="mt-4 text-sm text-zinc-600 dark:text-zinc-400">
+          <summary className="cursor-pointer font-semibold text-blue-700 dark:text-blue-400">¿Olvidaste tu contraseña?</summary>
+          <p className="mt-1">
+            Pídele al administrador de tu obra que te genere una contraseña temporal (en Equipo → Restablecer contraseña). Si eres el administrador de tu empresa,
+            pídesela a AvanceObra. Al entrar con ella, el sistema te pedirá crear una nueva.
+          </p>
+        </details>
         <p className="mt-5 text-center text-sm text-zinc-500">
           ¿Tu empresa aún no usa AvanceObra?{" "}
           <Link href="/demo" className="font-semibold text-blue-700 hover:underline dark:text-blue-400">

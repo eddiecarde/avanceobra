@@ -6,6 +6,7 @@ import { StatusBar } from "expo-status-bar";
 import { ActivityIndicator, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { mustChangePassword } from "../core/account";
 import { db } from "../db/database";
 import { SessionProvider, useSession } from "../state/session";
 import { NoticeWatcher } from "../ui/NoticeWatcher";
@@ -23,8 +24,12 @@ function Gate() {
       </View>
     );
   const inLogin = segments[0] === "login";
+  const inChange = segments[0] === "cambiar-clave";
+  const mustChange = mustChangePassword(session);
   if (!session && !inLogin) return <Redirect href="/login" />;
-  if (session && inLogin) return <Redirect href="/" />;
+  // Contraseña temporal: primero crea la suya
+  if (session && mustChange && !inChange) return <Redirect href="/cambiar-clave" />;
+  if (session && (inLogin || (inChange && !mustChange))) return <Redirect href="/" />;
   return (
     <View style={{ flex: 1, backgroundColor: t.bg }}>
       {session ? <SyncBanner /> : null}
@@ -38,6 +43,7 @@ function Gate() {
         }}
       >
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="cambiar-clave" options={{ title: "Tu contraseña", headerBackVisible: false }} />
         <Stack.Screen name="login" options={{ headerShown: false }} />
         <Stack.Screen name="registro/[frontId]/index" options={{ title: "Actividad" }} />
         <Stack.Screen name="registro/[frontId]/[activityId]" options={{ title: "Registrar avance" }} />

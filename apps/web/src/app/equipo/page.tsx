@@ -61,6 +61,8 @@ export default function Equipo() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const [welcome, setWelcome] = useState<string | null>(null);
+  // Mensaje con la contraseña temporal recién restablecida (para enviársela a la persona)
+  const [resetNote, setResetNote] = useState<string | null>(null);
   const [formMsg, setFormMsg] = useState<{ tone: "ok" | "error" | "info"; text: string } | null>(null);
 
   useEffect(() => {
@@ -177,6 +179,26 @@ export default function Equipo() {
     return patchMember(m, { company_id: c?.id ?? null }, c ? `${m.name} quedó en ${c.name}.` : `${m.name} quedó sin empresa.`);
   };
 
+  /** Nueva contraseña temporal para quien la olvidó: al entrar tendrá que cambiarla. */
+  async function resetPassword(m: Member) {
+    if (!window.confirm(`¿Generar una contraseña temporal nueva para ${m.name}? La que tiene deja de servir.`)) return;
+    setMsg(null);
+    setResetNote(null);
+    const password = tempPassword();
+    const { error } = await supabase.functions.invoke("team-reset-password", { body: { project_id: projectId, user_id: m.user_id, password } });
+    if (error) {
+      const detail = await (error as { context?: Response }).context?.json?.().catch(() => null);
+      return setMsg({ tone: "error", text: detail?.error ?? `No se pudo restablecer: ${error.message}` });
+    }
+    setMsg({ tone: "ok", text: `Contraseña de ${m.name} restablecida. Envíale el mensaje de abajo.` });
+    setResetNote(
+      `Hola ${m.name}, tu contraseña de AvanceObra se restableció.\n` +
+        `Entra en la app del teléfono o en ${window.location.origin} con tu correo ${m.email} y la contraseña temporal ${password}.\n` +
+        `Al entrar te pedirá crear una contraseña nueva.`,
+    );
+    reload();
+  }
+
   async function remove(m: Member) {
     if (!window.confirm(`¿Retirar a ${m.name} del proyecto? Conserva su cuenta y lo que registró, pero deja de ver el proyecto.`)) return;
     setMsg(null);
@@ -212,6 +234,15 @@ export default function Equipo() {
         <p className={cx("rounded-lg px-4 py-2 font-semibold", msg.tone === "ok" ? "bg-green-50 text-green-900 dark:bg-green-950 dark:text-green-200" : "bg-red-50 text-red-900 dark:bg-red-950 dark:text-red-200")}>
           {msg.text}
         </p>
+      ) : null}
+      {resetNote ? (
+        <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-950">
+          <div className="mb-1 text-xs font-bold uppercase text-zinc-500">Mensaje para enviarle</div>
+          <pre className="whitespace-pre-wrap font-sans text-sm">{resetNote}</pre>
+          <Button size="sm" className="mt-2" onClick={() => void navigator.clipboard.writeText(resetNote).then(() => setMsg({ tone: "ok", text: "Mensaje copiado." }))}>
+            Copiar mensaje
+          </Button>
+        </div>
       ) : null}
 
       <Card>
@@ -310,11 +341,16 @@ export default function Equipo() {
                           "Nunca"
                         )}
                       </td>
-                      <td className="py-2 text-right">
+                      <td className="space-x-1 py-2 text-right whitespace-nowrap">
                         {me ? null : (
-                          <Button size="sm" variant="ghost" onClick={() => void remove(m)}>
-                            Retirar
-                          </Button>
+                          <>
+                            <Button size="sm" variant="ghost" onClick={() => void resetPassword(m)} aria-label={`Restablecer contraseña de ${m.name}`}>
+                              Restablecer contraseña
+                            </Button>
+                            <Button size="sm" variant="ghost" onClick={() => void remove(m)}>
+                              Retirar
+                            </Button>
+                          </>
                         )}
                       </td>
                     </tr>

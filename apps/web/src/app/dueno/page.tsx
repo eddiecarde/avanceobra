@@ -17,6 +17,7 @@ interface Company {
   project_names: string[];
   users: number;
   admins: string[];
+  admin_users?: { user_id: string; name: string; email: string }[];
   last_sign_in: string | null;
   last_entry: string | null;
   entries_30d: number;
@@ -88,6 +89,25 @@ export default function Dueno() {
   }, [isPlatformAdmin, version]);
 
   if (!isPlatformAdmin) return <p className="text-zinc-600">Esta página es solo para el dueño de la plataforma.</p>;
+
+  /** Contraseña temporal nueva para el administrador de una empresa que la olvidó. */
+  async function resetAdmin(c: Company, a: { user_id: string; name: string; email: string }) {
+    if (!window.confirm(`¿Generar una contraseña temporal nueva para ${a.name} (${c.name})? La que tiene deja de servir.`)) return;
+    setMsg(null);
+    setWelcome(null);
+    const password = tempPassword();
+    const { error } = await supabase.functions.invoke("team-reset-password", { body: { user_id: a.user_id, password } });
+    if (error) {
+      const detail = await (error as { context?: Response }).context?.json?.().catch(() => null);
+      return setMsg({ tone: "error", text: detail?.error ?? `No se pudo restablecer: ${error.message}` });
+    }
+    setMsg({ tone: "ok", text: `Contraseña de ${a.name} restablecida. Envíale el mensaje de abajo.` });
+    setWelcome(
+      `Hola ${a.name}, tu contraseña de AvanceObra se restableció.\n` +
+        `Entra en ${window.location.origin} o en la app del teléfono con tu correo ${a.email} y la contraseña temporal ${password}.\n` +
+        `Al entrar te pedirá crear una contraseña nueva.`,
+    );
+  }
 
   async function toggle(c: Company) {
     setMsg(null);
@@ -182,7 +202,23 @@ export default function Dueno() {
                     </td>
                     <td className="text-right tabular-nums">{c.projects}</td>
                     <td className="text-right tabular-nums">{c.users}</td>
-                    <td>{c.admins.join(", ") || "—"}</td>
+                    <td>
+                      {c.admin_users?.length
+                        ? c.admin_users.map((a) => (
+                            <div key={a.user_id}>
+                              {a.name}{" "}
+                              <button
+                                type="button"
+                                className="text-xs font-semibold text-blue-700 hover:underline dark:text-blue-400"
+                                onClick={() => void resetAdmin(c, a)}
+                                aria-label={`Restablecer contraseña de ${a.name}`}
+                              >
+                                restablecer contraseña
+                              </button>
+                            </div>
+                          ))
+                        : c.admins.join(", ") || "—"}
+                    </td>
                     <td>{when(c.last_sign_in)}</td>
                     <td className="text-right tabular-nums">{c.entries_30d}</td>
                     <td>

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { buildDb } from "./fixtures";
+import { buildDb, PROJECT_ID } from "./fixtures";
 import { mockSupabase } from "./mock";
 
 test("equipo: crear una persona con contraseña temporal y mensaje para enviarle", async ({ page, context }) => {
@@ -89,4 +89,23 @@ test("cuenta: con contraseña temporal obliga a cambiarla y luego sigue", async 
   await page.getByRole("button", { name: "Cambiar contraseña" }).click();
   await expect(page).toHaveURL(/\/dashboard$/);
   expect(writes.find((w) => w.table === "auth.user")?.body).toMatchObject({ password: "MiClaveNueva2026", data: { must_change_password: false } });
+});
+
+test("equipo: restablecer la contraseña de alguien que la olvidó genera una temporal y el mensaje", async ({ page }) => {
+  const db = buildDb();
+  const calls: Record<string, unknown>[] = [];
+  db.functions = {
+    ...db.functions,
+    "team-reset-password": (body) => {
+      calls.push(body);
+      return [200, { status: "reset" }];
+    },
+  };
+  await mockSupabase(page, db);
+  await page.goto("/equipo");
+  page.once("dialog", (d) => void d.accept());
+  await page.getByRole("button", { name: /Restablecer contraseña de/ }).first().click();
+  await expect(page.getByText(/Contraseña de .* restablecida/)).toBeVisible();
+  await expect(page.getByText(/la contraseña temporal .{5}-.{5}-\d{2}/)).toBeVisible();
+  expect(calls[0]).toMatchObject({ project_id: PROJECT_ID, password: expect.stringMatching(/^.{5}-.{5}-\d{2}$/) });
 });
