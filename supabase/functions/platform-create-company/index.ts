@@ -2,7 +2,7 @@
 // (contraseña temporal, o su cuenta de siempre si ya existe) y su primera obra. Desde ahí la empresa
 // se maneja sola: su administrador crea obras y agrega a su equipo.
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { validateNewCompany } from "../_shared/platform.ts";
+import { PLANS, validateNewCompany } from "../_shared/platform.ts";
 import { CORS } from "../_shared/team.ts";
 
 const env = (k: string) => Deno.env.get(k) ?? "";
@@ -44,7 +44,13 @@ Deno.serve(async (req) => {
     await db.from("profiles").upsert({ id: userId, full_name: c.admin_name });
   }
 
-  const { data: org, error: e2 } = await db.from("organizations").insert({ name: c.company_name, tax_id: c.tax_id }).select("id").single();
+  const plan = PLANS[c.plan];
+  const paidUntil = plan.days ? new Date(Date.now() + plan.days * 86_400_000).toISOString().slice(0, 10) : null;
+  const { data: org, error: e2 } = await db
+    .from("organizations")
+    .insert({ name: c.company_name, tax_id: c.tax_id, plan: c.plan, max_projects: plan.maxProjects, max_users: plan.maxUsers, paid_until: paidUntil })
+    .select("id")
+    .single();
   if (e2 || !org) return reply(500, { error: e2?.message ?? "No se pudo crear la empresa." });
 
   // Si algo falla después de crear la empresa, se deshace (la obra se borra en cascada)

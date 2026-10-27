@@ -110,7 +110,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const isLogin = path === "/login";
   // El enlace compartido se ve sin sesión y sin el menú de administración
-  const isPublic = path === "/ver";
+  const isPublic = path === "/ver" || path === "/demo";
   // El cliente (sin membresía en ningún proyecto) solo usa su portal, sin el menú del equipo
   const isClientPortal = path === "/cliente";
   const group = groups.find((g) => g.pages.some((n) => path.startsWith(n.href)));
@@ -235,7 +235,10 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           </div>
         ) : null}
-        <main className="mx-auto max-w-[1600px] px-4 py-6 lg:px-6">{children}</main>
+        <main className="mx-auto max-w-[1600px] px-4 py-6 lg:px-6">
+          {isAdmin ? <PlanBanner /> : null}
+          {children}
+        </main>
       </div>
     </div>
   );
@@ -306,6 +309,46 @@ function ProjectBox() {
           </div>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/** Aviso al administrador cuando el plan de su empresa está por vencer (7 días) o venció. */
+function PlanBanner() {
+  const { orgId } = useSession();
+  const [plan, setPlan] = useState<{ orgId: string; paidUntil: string | null } | null>(null);
+
+  useEffect(() => {
+    if (!orgId) return;
+    let off = false;
+    void supabase
+      .from("organizations")
+      .select("paid_until")
+      .eq("id", orgId)
+      .maybeSingle()
+      .then(({ data }) => !off && setPlan({ orgId, paidUntil: (data?.paid_until as string | null) ?? null }));
+    return () => {
+      off = true;
+    };
+  }, [orgId]);
+
+  const paidUntil = plan?.orgId === orgId ? plan.paidUntil : null;
+  if (!paidUntil) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  const days = Math.round((Date.parse(`${paidUntil}T12:00:00Z`) - Date.parse(`${today}T12:00:00Z`)) / 86_400_000);
+  if (days > 7) return null;
+  const date = new Date(`${paidUntil}T12:00:00Z`).toLocaleDateString("es-CO", { day: "numeric", month: "long", year: "numeric" });
+  return (
+    <div
+      role="status"
+      className={cx(
+        "mb-4 rounded-lg border px-4 py-2 text-sm font-semibold print:hidden",
+        days < 0 ? "border-red-300 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200" : "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200",
+      )}
+    >
+      {days < 0
+        ? `El plan de tu empresa venció el ${date}. Comunícate con AvanceObra para renovarlo y no perder el acceso.`
+        : `El plan de tu empresa vence el ${date}${days === 0 ? " (hoy)" : ` (en ${days} día${days === 1 ? "" : "s"})`}. Comunícate con AvanceObra para renovarlo.`}
     </div>
   );
 }

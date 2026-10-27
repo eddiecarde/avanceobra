@@ -16,7 +16,8 @@ const ok = {
 describe("alta de empresa desde el panel del dueño", () => {
   it("normaliza nombre, correo y código de la obra", () => {
     const r = validateNewCompany(ok);
-    expect(r.ok && r.value).toMatchObject({ company_name: "Constructora Andina SAS", admin_email: "carolina@andina.co", project_code: "PSN-01", tax_id: "900123456-7" });
+    expect(r.ok && r.value).toMatchObject({ company_name: "Constructora Andina SAS", admin_email: "carolina@andina.co", project_code: "PSN-01", tax_id: "900123456-7", plan: "prueba" });
+    expect(validateNewCompany({ ...ok, plan: "oro" }).ok).toBe(false);
   });
   it("rechaza datos incompletos con mensajes claros", () => {
     const r = validateNewCompany({ ...ok, company_name: "A", admin_email: "x@", password: "123", end: "2026-10-01", tax_id: "" });

@@ -2,6 +2,7 @@
 
 import type { DailyQuantity, LossRecord, ScheduleActivity, SubfieldPlan, WorkCalendar } from "@avanceobra/engine";
 import { DEFAULT_WORKDAY, effectiveDaily, type Resource } from "./library";
+import { projectLogo } from "./logo";
 import { supabase } from "./supabase";
 
 export const LOSS_LABEL: Record<string, string> = {
@@ -20,6 +21,8 @@ export const WEATHER_LABEL: Record<string, string> = { sunny: "Soleado", cloudy:
 export const SEVERITY_RANK: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
 
 export interface ReportHeader {
+  /** Logo de la obra o de la empresa (URL pública), para informes y actas. */
+  logoUrl?: string | null;
   clientName: string | null;
   contractorName: string | null;
   contractCode: string | null;
@@ -161,7 +164,7 @@ export async function loadDashboard(projectId: string): Promise<DashData> {
     supabase
       .from("projects")
       .select(
-        "id, name, location_name, zone_label, start_date, contract_end_date, workdays, holidays, colombian_holidays, client_name, contractor_name, contract_code, report_code, report_signers, personnel_roles, equipment_types",
+        "id, name, location_name, zone_label, start_date, contract_end_date, workdays, holidays, colombian_holidays, client_name, contractor_name, contract_code, report_code, report_signers, personnel_roles, equipment_types, logo_path, org:organizations(logo_path)",
       )
       .eq("id", projectId)
       .single(),
@@ -249,6 +252,8 @@ export interface RawDash {
     report_signers?: string[] | null;
     personnel_roles?: string[] | null;
     equipment_types?: string[] | null;
+    logo_path?: string | null;
+    org?: unknown;
   };
   activities: {
     id: string;
@@ -394,6 +399,7 @@ export function buildDashData(raw: RawDash, plan: DashData["plan"]): DashData {
       zoneLabel: prj.zone_label ?? null,
       calendar: projectCalendar(prj),
       header: {
+        logoUrl: projectLogo(prj),
         clientName: prj.client_name ?? null,
         contractorName: prj.contractor_name ?? null,
         contractCode: prj.contract_code ?? null,

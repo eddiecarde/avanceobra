@@ -57,6 +57,17 @@ export async function exportWeeklyXlsx(r: WeeklyReport): Promise<ArrayBuffer> {
   const rs = wb.addWorksheet("REPORTE SEMANAL", { pageSetup: { paperSize: 9, orientation: "portrait", fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
   rs.columns = [{ width: 6 }, { width: 40 }, { width: 14 }, { width: 14 }, { width: 14 }, { width: 14 }, { width: 14 }, { width: 22 }, { width: 10 }, { width: 11 }];
   title(rs, 1, "INFORME SEMANAL DE CONSTRUCCIÓN", 6, { fill: BLUE, size: 13 });
+  // Logo de la empresa (si no se puede descargar, el informe sale igual)
+  if (h.logoUrl) {
+    try {
+      const res = await fetch(h.logoUrl);
+      const type = res.headers.get("content-type") ?? "";
+      const extension = type.includes("png") ? "png" : type.includes("gif") ? "gif" : "jpeg";
+      if (res.ok) rs.addImage(wb.addImage({ buffer: await res.arrayBuffer(), extension }), { tl: { col: 8.1, row: 0.1 }, ext: { width: 110, height: 40 } });
+    } catch {
+      // sin logo
+    }
+  }
   rs.mergeCells(1, 7, 1, 8);
   rs.getCell(1, 7).value = `Código: ${h.reportCode ?? "—"}\nFecha: ${week.lastWorkday.split("-").reverse().join("/")}`;
   rs.getCell(1, 7).alignment = { wrapText: true, vertical: "middle" };

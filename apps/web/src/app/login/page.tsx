@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { Button, Card, Field, Input } from "@/components/ui";
 import { supabase } from "@/lib/supabase";
@@ -39,6 +40,12 @@ export default function Login() {
             {busy ? "Entrando…" : "Entrar"}
           </Button>
         </form>
+        <p className="mt-5 text-center text-sm text-zinc-500">
+          ¿Tu empresa aún no usa AvanceObra?{" "}
+          <Link href="/demo" className="font-semibold text-blue-700 hover:underline dark:text-blue-400">
+            Pide una demostración
+          </Link>
+        </p>
       </Card>
     </div>
   );

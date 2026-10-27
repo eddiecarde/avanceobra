@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { Button } from "@/components/ui";
 import { cop, settlementRows, type ProjectHeader, type Settlement } from "@/lib/actas";
+import { projectLogo } from "@/lib/logo";
 import { supabase } from "@/lib/supabase";
 
 export default function LiquidacionPage() {
@@ -27,7 +28,7 @@ function Liquidacion() {
       if (error || !data) return setState({ error: error?.message ?? "No se encontró la liquidación." });
       const s = data as Settlement & { project_id: string };
       const [{ data: p }, company] = await Promise.all([
-        supabase.from("projects").select("name, client_name, contractor_name, contract_code, report_signers, start_date").eq("id", s.project_id).single(),
+        supabase.from("projects").select("name, client_name, contractor_name, contract_code, report_signers, start_date, logo_path, org:organizations(logo_path)").eq("id", s.project_id).single(),
         s.company_id ? supabase.from("project_companies").select("name").eq("id", s.company_id).single() : Promise.resolve({ data: null }),
       ]);
       const project = p as ProjectHeader;
@@ -38,6 +39,7 @@ function Liquidacion() {
   if (!state) return <p className="text-zinc-500">Cargando liquidación…</p>;
   if ("error" in state) return <p className="text-red-700">{state.error}</p>;
   const { s, project, target } = state;
+  const logo = projectLogo(project as ProjectHeader & { logo_path?: string | null; org?: unknown });
   const signers = project.report_signers?.length ? project.report_signers : ["Contratista", "Interventoría", "Cliente"];
 
   return (
@@ -51,6 +53,10 @@ function Liquidacion() {
         </Button>
       </div>
       <header className="border-b-2 border-black pb-2">
+        {logo ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={logo} alt="Logo de la empresa" className="float-right h-12 w-auto max-w-[180px] object-contain" />
+        ) : null}
         <h1 className="text-xl font-extrabold">
           ACTA DE LIQUIDACIÓN FINAL
           {s.status === "anulada" ? " — ANULADA" : ""}

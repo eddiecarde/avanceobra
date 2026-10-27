@@ -3,7 +3,7 @@
 import { reportWeeks } from "@avanceobra/engine";
 import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Button, downloadBlob, Field, Select } from "@/components/ui";
+import { Button, cx, downloadBlob, Field, Select } from "@/components/ui";
 import { loadDashboard, localToday, type DashData } from "@/lib/dashboard";
 import { useCurrentProject, useSession } from "@/lib/session";
 import {
@@ -170,7 +170,13 @@ function Sheet({ r, photos }: { r: WeeklyReport; photos: WeeklyReport["photos"] 
   return (
     // Hoja siempre clara, igual a como sale impresa
     <article className="mx-auto max-w-[1100px] rounded-lg bg-white p-6 text-[13px] leading-snug text-zinc-900 shadow-sm ring-1 ring-zinc-200 print:max-w-none print:p-0 print:shadow-none print:ring-0">
-      <header className="grid grid-cols-[1fr_auto] border border-zinc-400">
+      <header className={cx("grid border border-zinc-400", h.logoUrl ? "grid-cols-[auto_1fr_auto]" : "grid-cols-[1fr_auto]")}>
+        {h.logoUrl ? (
+          <div className="flex items-center border-r border-zinc-400 px-2">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={h.logoUrl} alt="Logo de la empresa" className="h-10 w-auto max-w-[140px] object-contain" />
+          </div>
+        ) : null}
         <div className="bg-[#1f4e79] px-3 py-2 text-center text-lg font-extrabold text-white">INFORME SEMANAL DE CONSTRUCCIÓN</div>
         <div className="border-l border-zinc-400 px-3 py-1 text-xs">
           Código: <b>{h.reportCode ?? "—"}</b>

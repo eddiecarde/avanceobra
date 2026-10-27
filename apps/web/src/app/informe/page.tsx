@@ -177,7 +177,11 @@ function Informe() {
         // Hoja siempre clara (también en modo oscuro), igual a como sale impresa
         <article className="mx-auto max-w-[900px] rounded-lg bg-white p-8 text-[14px] leading-snug text-zinc-900 shadow-sm ring-1 ring-zinc-200 print:max-w-none print:p-0 print:shadow-none print:ring-0">
           <header className="flex flex-wrap items-start justify-between gap-4 border-b-4 border-blue-700 pb-3">
-            <div>
+            {data.project.header.logoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={data.project.header.logoUrl} alt="Logo de la empresa" className="h-14 w-auto max-w-[180px] object-contain" />
+            ) : null}
+            <div className="mr-auto">
               <div className="text-xl font-extrabold">
                 Avance<span className="text-blue-700">Obra</span> · Informe diario de obra
               </div>

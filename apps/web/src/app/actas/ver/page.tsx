@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { Button } from "@/components/ui";
 import { cop, qty, totalsRows, type Certificate, type ProjectHeader } from "@/lib/actas";
+import { projectLogo } from "@/lib/logo";
 import { supabase } from "@/lib/supabase";
 
 export default function VerActaPage() {
@@ -27,7 +28,7 @@ function VerActa() {
       if (error || !c) return setState({ error: error?.message ?? "No se encontró el acta." });
       const cert = c as Certificate & { project_id: string };
       const [{ data: p }, company] = await Promise.all([
-        supabase.from("projects").select("name, client_name, contractor_name, contract_code, report_signers, start_date").eq("id", cert.project_id).single(),
+        supabase.from("projects").select("name, client_name, contractor_name, contract_code, report_signers, start_date, logo_path, org:organizations(logo_path)").eq("id", cert.project_id).single(),
         cert.company_id ? supabase.from("project_companies").select("name").eq("id", cert.company_id).single() : Promise.resolve({ data: null }),
       ]);
       const project = p as ProjectHeader;
@@ -38,6 +39,7 @@ function VerActa() {
   if (!state) return <p className="text-zinc-500">Cargando acta…</p>;
   if ("error" in state) return <p className="text-red-700">{state.error}</p>;
   const { cert, project, target } = state;
+  const logo = projectLogo(project as ProjectHeader & { logo_path?: string | null; org?: unknown });
   const t = cert.totals;
   const signers = project.report_signers?.length ? project.report_signers : ["Elaboró", "Revisó", "Aprobó"];
 
@@ -52,6 +54,10 @@ function VerActa() {
         </Button>
       </div>
       <header className="border-b-2 border-black pb-2">
+        {logo ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={logo} alt="Logo de la empresa" className="float-right h-12 w-auto max-w-[180px] object-contain" />
+        ) : null}
         <h1 className="text-xl font-extrabold">
           ACTA DE CORTE N° {cert.number}
           {cert.status === "anulada" ? " — ANULADA" : ""}

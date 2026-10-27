@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Badge, Button, Card, Field, Input } from "@/components/ui";
+import { Badge, Button, Card, Field, Input, Select } from "@/components/ui";
 import { useSession } from "@/lib/session";
+import { PLANS, type Plan } from "@/lib/subscription";
 import { supabase } from "@/lib/supabase";
 
 interface Company {
@@ -19,7 +20,34 @@ interface Company {
   last_sign_in: string | null;
   last_entry: string | null;
   entries_30d: number;
+  plan: Plan;
+  max_projects: number | null;
+  max_users: number | null;
+  paid_until: string | null;
+  monthly_fee: number | null;
 }
+
+interface DemoRequest {
+  id: string;
+  name: string;
+  company: string;
+  email: string;
+  phone: string | null;
+  city: string | null;
+  project_type: string | null;
+  projects_count: number | null;
+  message: string | null;
+  status: "nuevo" | "contactado" | "convertido" | "descartado";
+  created_at: string;
+}
+
+const DEMO_STATUS: Record<DemoRequest["status"], { label: string; tone: "amber" | "blue" | "green" | "neutral" }> = {
+  nuevo: { label: "Nuevo", tone: "amber" },
+  contactado: { label: "Contactado", tone: "blue" },
+  convertido: { label: "Ya es cliente", tone: "green" },
+  descartado: { label: "Descartado", tone: "neutral" },
+};
+const today = () => new Date().toISOString().slice(0, 10);
 
 const when = (d: string | null) => (d ? new Date(d).toLocaleDateString("es-CO", { day: "numeric", month: "short", year: "numeric" }) : "—");
 
@@ -30,7 +58,7 @@ function tempPassword() {
   return `${pick(5)}-${pick(5)}-${Math.floor(10 + (crypto.getRandomValues(new Uint32Array(1))[0]! % 90))}`;
 }
 
-const EMPTY = { company_name: "", tax_id: "", admin_name: "", admin_email: "", password: "", project_name: "", project_code: "", start: "", end: "" };
+const EMPTY = { company_name: "", tax_id: "", admin_name: "", admin_email: "", password: "", project_name: "", project_code: "", start: "", end: "", plan: "prueba" };
 
 /** Panel del dueño de la plataforma: empresas, su uso, alta de empresas nuevas y suspensión. */
 export default function Dueno() {
@@ -41,6 +69,9 @@ export default function Dueno() {
   const [form, setForm] = useState(EMPTY);
   const [busy, setBusy] = useState(false);
   const [welcome, setWelcome] = useState<string | null>(null);
+  const [requests, setRequests] = useState<DemoRequest[]>([]);
+  const [fromRequest, setFromRequest] = useState<string | null>(null);
+  const [planFor, setPlanFor] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isPlatformAdmin) return;
@@ -48,6 +79,12 @@ export default function Dueno() {
       if (error) setMsg({ tone: "error", text: error.message });
       else setCompanies((data ?? []) as Company[]);
     });
+    void supabase
+      .from("demo_requests")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(50)
+      .then(({ data }) => setRequests((data ?? []) as DemoRequest[]));
   }, [isPlatformAdmin, version]);
 
   if (!isPlatformAdmin) return <p className="text-zinc-600">Esta página es solo para el dueño de la plataforma.</p>;
@@ -77,7 +114,10 @@ export default function Dueno() {
       const detail = await (error as { context?: Response }).context?.json?.().catch(() => null);
       return setMsg({ tone: "error", text: detail?.error ?? `No se pudo crear: ${error.message}` });
     }
-    const created = (data as { status: string }).status === "created";
+    const result = data as { status: string; org_id: string };
+    const created = result.status === "created";
+    if (fromRequest) await supabase.from("demo_requests").update({ status: "convertido", org_id: result.org_id, updated_at: new Date().toISOString() }).eq("id", fromRequest);
+    setFromRequest(null);
     setMsg({ tone: "ok", text: `${form.company_name} quedó creada con su primera obra.` });
     setWelcome(
       `Hola ${form.admin_name}, ya tienes acceso a AvanceObra como administrador de ${form.company_name}.\n` +
@@ -124,6 +164,7 @@ export default function Dueno() {
                   <th>Administradores</th>
                   <th>Último ingreso</th>
                   <th className="text-right">Registros (30 días)</th>
+                  <th>Plan</th>
                   <th>Estado</th>
                   <th />
                 </tr>
@@ -145,6 +186,17 @@ export default function Dueno() {
                     <td>{when(c.last_sign_in)}</td>
                     <td className="text-right tabular-nums">{c.entries_30d}</td>
                     <td>
+                      <b>{PLANS[c.plan]?.label ?? c.plan}</b>
+                      <div className="text-xs text-zinc-500">
+                        obras {c.projects}/{c.max_projects ?? "∞"} · usuarios {c.users}/{c.max_users ?? "∞"}
+                      </div>
+                      {c.paid_until ? (
+                        <div className={c.paid_until < today() ? "text-xs font-semibold text-red-700 dark:text-red-400" : "text-xs text-zinc-500"}>
+                          {c.paid_until < today() ? "venció" : "vence"} {when(c.paid_until)}
+                        </div>
+                      ) : null}
+                    </td>
+                    <td>
                       {c.suspended_at ? (
                         <>
                           <Badge tone="red">Suspendida</Badge>
@@ -154,7 +206,10 @@ export default function Dueno() {
                         <Badge tone="green">Activa</Badge>
                       )}
                     </td>
-                    <td className="text-right">
+                    <td className="space-x-1 text-right whitespace-nowrap">
+                      <Button size="sm" onClick={() => setPlanFor(planFor === c.id ? null : c.id)} aria-label={`Plan de ${c.name}`}>
+                        Plan
+                      </Button>
                       <Button size="sm" variant={c.suspended_at ? "primary" : "ghost"} onClick={() => void toggle(c)}>
                         {c.suspended_at ? "Reactivar" : "Suspender"}
                       </Button>
@@ -164,6 +219,74 @@ export default function Dueno() {
               </tbody>
             </table>
           </div>
+        )}
+      </Card>
+
+      {planFor && companies ? (
+        <PlanEditor
+          key={planFor}
+          company={companies.find((c) => c.id === planFor)!}
+          onSaved={(text) => {
+            setMsg({ tone: "ok", text });
+            setPlanFor(null);
+            setVersion((v) => v + 1);
+          }}
+          onError={(text) => setMsg({ tone: "error", text })}
+        />
+      ) : null}
+
+      <Card>
+        <h2 className="text-lg font-bold">Solicitudes de demostración ({requests.filter((r) => r.status === "nuevo").length} nuevas)</h2>
+        <p className="mb-2 text-sm text-zinc-600 dark:text-zinc-400">Llegan desde la página pública /demo (enlace en la entrada de la web).</p>
+        {requests.length ? (
+          <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
+            {requests.map((r) => (
+              <li key={r.id} className="flex flex-wrap items-start gap-3 py-2 text-sm">
+                <div className="mr-auto min-w-64">
+                  <b>{r.company}</b> · {r.name}
+                  <div className="text-zinc-500">
+                    {r.email}
+                    {r.phone ? ` · ${r.phone}` : ""}
+                    {r.city ? ` · ${r.city}` : ""}
+                    {r.project_type ? ` · ${r.project_type}` : ""}
+                    {r.projects_count ? ` · ${r.projects_count} obra(s)` : ""} · {when(r.created_at)}
+                  </div>
+                  {r.message ? <div className="text-zinc-700 dark:text-zinc-300">{r.message}</div> : null}
+                </div>
+                <Badge tone={DEMO_STATUS[r.status].tone}>{DEMO_STATUS[r.status].label}</Badge>
+                <Select
+                  aria-label={`Estado de ${r.company}`}
+                  value={r.status}
+                  className="w-40 py-1"
+                  onChange={async (e) => {
+                    const { error } = await supabase.from("demo_requests").update({ status: e.target.value, updated_at: new Date().toISOString() }).eq("id", r.id);
+                    if (error) return setMsg({ tone: "error", text: error.message });
+                    setVersion((v) => v + 1);
+                  }}
+                >
+                  {Object.entries(DEMO_STATUS).map(([k, v]) => (
+                    <option key={k} value={k}>
+                      {v.label}
+                    </option>
+                  ))}
+                </Select>
+                {r.status !== "convertido" ? (
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      setForm({ ...EMPTY, company_name: r.company, admin_name: r.name, admin_email: r.email });
+                      setFromRequest(r.id);
+                      setMsg({ tone: "ok", text: `Formulario de alta llenado con los datos de ${r.company}: completa la obra y crea la empresa.` });
+                    }}
+                  >
+                    Dar de alta
+                  </Button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-zinc-500">Aún no hay solicitudes.</p>
         )}
       </Card>
 
@@ -200,6 +323,17 @@ export default function Dueno() {
           <Field label="Código de la obra">
             <Input value={form.project_code} onChange={(e) => set("project_code", e.target.value.toUpperCase())} placeholder="p. ej. PSN-01" />
           </Field>
+          <Field label="Plan">
+            <Select value={form.plan} onChange={(e) => set("plan", e.target.value)}>
+              {(Object.keys(PLANS) as Plan[]).map((k) => (
+                <option key={k} value={k}>
+                  {PLANS[k].label}
+                  {PLANS[k].maxProjects ? ` · ${PLANS[k].maxProjects} obra(s), ${PLANS[k].maxUsers} usuarios` : " · sin límites"}
+                  {PLANS[k].days ? ` · ${PLANS[k].days} días` : ""}
+                </option>
+              ))}
+            </Select>
+          </Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Inicio">
               <Input type="date" value={form.start} onChange={(e) => set("start", e.target.value)} />
@@ -222,5 +356,68 @@ export default function Dueno() {
         ) : null}
       </Card>
     </div>
+  );
+}
+
+/** Plan de una empresa: obras y usuarios permitidos, hasta cuándo está pagada y su tarifa mensual. */
+function PlanEditor({ company, onSaved, onError }: { company: Company; onSaved: (text: string) => void; onError: (text: string) => void }) {
+  const [f, setF] = useState({
+    plan: company.plan,
+    max_projects: company.max_projects == null ? "" : String(company.max_projects),
+    max_users: company.max_users == null ? "" : String(company.max_users),
+    paid_until: company.paid_until ?? "",
+    monthly_fee: company.monthly_fee == null ? "" : String(company.monthly_fee),
+  });
+  const intOrNull = (s: string) => (s.trim() ? Math.max(1, Math.round(Number(s))) : null);
+
+  async function save() {
+    const { error } = await supabase.rpc("platform_set_plan", {
+      p_org: company.id,
+      p_plan: f.plan,
+      p_max_projects: intOrNull(f.max_projects),
+      p_max_users: intOrNull(f.max_users),
+      p_paid_until: f.paid_until || null,
+      p_monthly_fee: f.monthly_fee.trim() ? Number(f.monthly_fee.replace(/[$\s.]/g, "").replace(",", ".")) : null,
+    });
+    if (error) return onError(error.message);
+    onSaved(`Plan de ${company.name} actualizado.`);
+  }
+
+  return (
+    <Card>
+      <h2 className="mb-3 text-lg font-bold">Plan de {company.name}</h2>
+      <div className="grid gap-3 md:grid-cols-5">
+        <Field label="Plan">
+          <Select
+            value={f.plan}
+            onChange={(e) => {
+              const k = e.target.value as Plan;
+              setF({ ...f, plan: k, max_projects: PLANS[k].maxProjects == null ? "" : String(PLANS[k].maxProjects), max_users: PLANS[k].maxUsers == null ? "" : String(PLANS[k].maxUsers) });
+            }}
+          >
+            {(Object.keys(PLANS) as Plan[]).map((k) => (
+              <option key={k} value={k}>
+                {PLANS[k].label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Obras" hint="(vacío = sin límite)">
+          <Input inputMode="numeric" value={f.max_projects} onChange={(e) => setF({ ...f, max_projects: e.target.value })} />
+        </Field>
+        <Field label="Usuarios" hint="(vacío = sin límite)">
+          <Input inputMode="numeric" value={f.max_users} onChange={(e) => setF({ ...f, max_users: e.target.value })} />
+        </Field>
+        <Field label="Pagado hasta">
+          <Input type="date" value={f.paid_until} onChange={(e) => setF({ ...f, paid_until: e.target.value })} />
+        </Field>
+        <Field label="Tarifa mensual" hint="($)">
+          <Input inputMode="numeric" value={f.monthly_fee} onChange={(e) => setF({ ...f, monthly_fee: e.target.value })} />
+        </Field>
+      </div>
+      <Button className="mt-3" variant="primary" onClick={() => void save()}>
+        Guardar plan
+      </Button>
+    </Card>
   );
 }

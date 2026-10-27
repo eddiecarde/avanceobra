@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Badge, Button, Card, cx, Field, Input, Select, Textarea } from "@/components/ui";
+import { logoUrl } from "@/lib/logo";
 import { useCurrentProject, useSession } from "@/lib/session";
 import { supabase } from "@/lib/supabase";
 
@@ -63,7 +64,7 @@ export default function Empresa() {
   const [picked] = useCurrentProject();
   // La obra del menú lateral (o la primera de la empresa)
   const projectId = picked || memberships.find((m) => m.org_id === orgId)?.project_id || "";
-  const [org, setOrg] = useState<{ name: string; tax_id: string } | null>(null);
+  const [org, setOrg] = useState<{ name: string; tax_id: string; logo_path: string | null } | null>(null);
   const [people, setPeople] = useState<Person[]>([]);
   const [form, setForm] = useState<Defaults>(EMPTY);
   const [candidate, setCandidate] = useState("");
@@ -75,13 +76,13 @@ export default function Empresa() {
     if (!orgId || !isAdmin) return;
     let off = false;
     void Promise.all([
-      supabase.from("organizations").select("name, tax_id").eq("id", orgId).single(),
+      supabase.from("organizations").select("name, tax_id, logo_path").eq("id", orgId).single(),
       supabase.rpc("org_people", { p_org: orgId }),
       supabase.from("org_settings").select("*").eq("org_id", orgId).maybeSingle(),
     ]).then(([o, p, s]) => {
       if (off) return;
       if (o.error || p.error) return setMsg({ tone: "error", text: (o.error ?? p.error)!.message });
-      setOrg({ name: o.data.name ?? "", tax_id: o.data.tax_id ?? "" });
+      setOrg({ name: o.data.name ?? "", tax_id: o.data.tax_id ?? "", logo_path: o.data.logo_path ?? null });
       setPeople((p.data ?? []) as Person[]);
       const d = s.data;
       if (d)
@@ -147,6 +148,21 @@ export default function Empresa() {
     setMsg({ tone: "ok", text: `Copiados los valores de ${p.data.name}. Revisa y pulsa Guardar.` });
   }
 
+  /** Sube el logo (PNG o JPG, máximo 1 MB) y queda en informes y actas de todas las obras. */
+  async function uploadLogo(file: File | undefined) {
+    if (!file || !orgId) return;
+    if (!/^image\/(png|jpe?g)$/.test(file.type)) return setMsg({ tone: "error", text: "El logo debe ser PNG o JPG." });
+    if (file.size > 1_000_000) return setMsg({ tone: "error", text: "El logo debe pesar menos de 1 MB." });
+    setBusy(true);
+    const path = `${orgId}/logo-${Date.now()}.${file.type.includes("png") ? "png" : "jpg"}`;
+    const up = await supabase.storage.from("logos").upload(path, file, { contentType: file.type });
+    if (up.error) {
+      setBusy(false);
+      return setMsg({ tone: "error", text: `No se pudo subir el logo: ${up.error.message}` });
+    }
+    return run(() => supabase.from("organizations").update({ logo_path: path }).eq("id", orgId), "Logo guardado: ya sale en los informes y las actas.");
+  }
+
   function saveDefaults() {
     const roles = lines(form.personnel_roles);
     const equipment = lines(form.equipment_types);
@@ -201,6 +217,22 @@ export default function Empresa() {
               Guardar datos
             </Button>
           </div>
+        </div>
+      </Card>
+
+      <Card>
+        <h2 className="text-lg font-bold">Logo</h2>
+        <p className="mb-3 text-sm text-zinc-600 dark:text-zinc-400">Sale en el informe diario, el informe semanal (pantalla, impresión y Excel), las actas de cobro y la liquidación.</p>
+        <div className="flex flex-wrap items-center gap-4">
+          {logoUrl(org.logo_path) ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={logoUrl(org.logo_path)!} alt="Logo de la empresa" className="h-16 w-auto max-w-[220px] rounded border border-zinc-200 bg-white object-contain p-1" />
+          ) : (
+            <span className="text-sm text-zinc-500">Sin logo todavía.</span>
+          )}
+          <Field label={org.logo_path ? "Cambiar logo" : "Subir logo"} hint="(PNG o JPG, máximo 1 MB)">
+            <Input type="file" accept="image/png,image/jpeg" disabled={busy} onChange={(e) => void uploadLogo(e.target.files?.[0])} className="py-1.5" />
+          </Field>
         </div>
       </Card>
 
