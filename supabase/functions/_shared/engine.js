@@ -156,15 +156,15 @@ function historicalRate(records, lastNDays) {
   };
 }
 function compareRates(referencePerUnit, realPerUnit, resourceName = "el recurso") {
-  const ratio2 = referencePerUnit > 0 ? realPerUnit / referencePerUnit : 0;
+  const ratio3 = referencePerUnit > 0 ? realPerUnit / referencePerUnit : 0;
   const warnings = [];
-  if (ratio2 < 0.6)
+  if (ratio3 < 0.6)
     warnings.push(
-      `El rendimiento real de ${resourceName} es ${(ratio2 * 100).toFixed(0)} % del de referencia. Probablemente el recurso limitante es otro (acarreo/volquetas, compactaci\xF3n, frente de trabajo o permisos): revise la cadena antes de agregar m\xE1s unidades de ${resourceName}.`
+      `El rendimiento real de ${resourceName} es ${(ratio3 * 100).toFixed(0)} % del de referencia. Probablemente el recurso limitante es otro (acarreo/volquetas, compactaci\xF3n, frente de trabajo o permisos): revise la cadena antes de agregar m\xE1s unidades de ${resourceName}.`
     );
-  else if (ratio2 > 1.3)
-    warnings.push(`El rendimiento real supera en ${((ratio2 - 1) * 100).toFixed(0)} % la referencia: verifique las cantidades reportadas.`);
-  return { referencePerUnit, realPerUnit, ratio: ratio2, warnings };
+  else if (ratio3 > 1.3)
+    warnings.push(`El rendimiento real supera en ${((ratio3 - 1) * 100).toFixed(0)} % la referencia: verifique las cantidades reportadas.`);
+  return { referencePerUnit, realPerUnit, ratio: ratio3, warnings };
 }
 
 // packages/engine/src/equipment.ts
@@ -238,9 +238,9 @@ function bottleneck(stages) {
 function project(input, rate) {
   if (rate <= 0) return { dailyRate: rate, workingDaysNeeded: Infinity, finishDate: null, delayDays: null };
   const effectiveRate = rate * (1 - (input.rainLossRatio ?? 0));
-  const days = Math.ceil(input.pendingQty / effectiveRate - 1e-9);
-  const finish = addWorkingDays(input.fromDate, days, input.calendar);
-  return { dailyRate: rate, workingDaysNeeded: days, finishDate: finish, delayDays: diffDays(input.deadline, finish) };
+  const days2 = Math.ceil(input.pendingQty / effectiveRate - 1e-9);
+  const finish = addWorkingDays(input.fromDate, days2, input.calendar);
+  return { dailyRate: rate, workingDaysNeeded: days2, finishDate: finish, delayDays: diffDays(input.deadline, finish) };
 }
 function projectCompletion(input) {
   const optimistic = project(input, input.rates.optimistic);
@@ -318,12 +318,12 @@ function unitDailyCost(c) {
   const labor = (c.operatorPerHour ?? 0) * (1 + (c.laborSurcharge ?? 0));
   return (c.rentalPerHour + labor + (c.fuelPerHour ?? 0) + (c.maintenancePerHour ?? 0)) * c.paidHoursPerDay;
 }
-function unitCostForDays(c, days, includeMobilization) {
-  const billable = Math.max(days, c.minRentalDays ?? 0);
+function unitCostForDays(c, days2, includeMobilization) {
+  const billable = Math.max(days2, c.minRentalDays ?? 0);
   return unitDailyCost(c) * billable + (includeMobilization ? c.mobilization ?? 0 : 0);
 }
-function presentValue(amount, days, annualRate) {
-  return amount / (1 + annualRate) ** (days / 365);
+function presentValue(amount, days2, annualRate) {
+  return amount / (1 + annualRate) ** (days2 / 365);
 }
 function formatMoney(amount, currency = "COP", locale = "es-CO") {
   return new Intl.NumberFormat(locale, { style: "currency", currency, maximumFractionDigits: 0 }).format(amount);
@@ -567,11 +567,11 @@ function findingAlerts(f, today, dueSoonDays = 2) {
   if (f.severity === "critical")
     out.push({ kind: "critical_finding", severity: "critical", title: "Hallazgo cr\xEDtico", body: f.description, refId: f.id });
   if (f.dueDate) {
-    const days = Math.round((Date.parse(f.dueDate) - Date.parse(today)) / 864e5);
-    if (days < 0)
-      out.push({ kind: "overdue", severity: "high", title: "Pendiente vencido", body: `Venci\xF3 hace ${-days} d\xEDas: ${f.description}`, refId: f.id });
-    else if (days <= dueSoonDays)
-      out.push({ kind: "due_soon", severity: "medium", title: "Pendiente por vencer", body: `Vence en ${days} d\xEDas: ${f.description}`, refId: f.id });
+    const days2 = Math.round((Date.parse(f.dueDate) - Date.parse(today)) / 864e5);
+    if (days2 < 0)
+      out.push({ kind: "overdue", severity: "high", title: "Pendiente vencido", body: `Venci\xF3 hace ${-days2} d\xEDas: ${f.description}`, refId: f.id });
+    else if (days2 <= dueSoonDays)
+      out.push({ kind: "due_soon", severity: "medium", title: "Pendiente por vencer", body: `Vence en ${days2} d\xEDas: ${f.description}`, refId: f.id });
   }
   return out;
 }
@@ -775,13 +775,13 @@ function relaxPlan(sim, start) {
 function uniformAcceleration(sim) {
   const base = evaluatePlan(sim, basePlan(sim));
   if (base.delayDays === 0) return base;
-  const ratio2 = sim.availableDays / base.projectDuration;
+  const ratio3 = sim.availableDays / base.projectDuration;
   const rules = rulesOf(sim);
   const plan = basePlan(sim);
   for (const a of sim.activities) {
     if (!canAccelerate(a)) continue;
     const d0 = ceilDays(a.pendingQty, activityDailyOutput(a, plan[a.id], rules));
-    const target = Math.max(1, Math.floor(d0 * ratio2));
+    const target = Math.max(1, Math.floor(d0 * ratio3));
     let chosen = null;
     const maxExtra = (a.maxUnits ?? a.currentUnits + 10) - a.currentUnits;
     for (let s = 1; s <= (a.maxShifts ?? 1); s++) {
@@ -886,8 +886,8 @@ function plannedQtyAt(a, date, cal = {}) {
 function recentDailyRate(daily, activityId, today, windowDays = 14, cal = {}) {
   const from = addDays(today, -(windowDays - 1));
   const qty = daily.filter((d) => d.activityId === activityId && d.date >= from && d.date <= today).reduce((s, d) => s + d.quantity, 0);
-  const days = workingDaysBetween(from, today, cal);
-  return days > 0 ? qty / days : 0;
+  const days2 = workingDaysBetween(from, today, cal);
+  return days2 > 0 ? qty / days2 : 0;
 }
 function weighting(activities) {
   const acts = activities.filter((a) => a.contractQty > 0 && a.plannedStart && a.plannedFinish);
@@ -949,9 +949,9 @@ function sCurve(input) {
     } else u.daysLeft = u.f >= 1 - 1e-9 ? 0 : u.r > 0 ? Math.ceil((1 - u.f) / u.r - 1e-9) : null;
   }
   const projected = (date) => {
-    const days = date > input.today ? wd(addDays(input.today, 1), date) : 0;
+    const days2 = date > input.today ? wd(addDays(input.today, 1), date) : 0;
     let s = 0;
-    for (const u of units.values()) s += u.W * Math.min(1, u.f + u.r * days);
+    for (const u of units.values()) s += u.W * Math.min(1, u.f + u.r * days2);
     return s;
   };
   const actualAt = (date) => acts.reduce((s, a) => s + w(a) * Math.min(1, sumUntil(a.id, date) / a.contractQty), 0);
@@ -1138,16 +1138,16 @@ function rainInWindow(intervals, window) {
 function weatherClaim(logs, entryHours, opts) {
   const rain = new Map([...logs].map((l) => [l.date, l.rain]));
   const dates = [.../* @__PURE__ */ new Set([...rain.keys(), ...entryHours.keys()])].sort();
-  const days = [];
+  const days2 = [];
   for (const date of dates) {
     const intervals = rain.get(date) ?? [];
     const rainHours = rainInWindow(intervals, opts.window) / 60;
     const fromEntries = entryHours.get(date) ?? 0;
     const hours2 = Math.min(opts.effectiveHours, Math.max(rainHours, fromEntries));
-    if (hours2 > 0) days.push({ date, rain: intervals, rainHours, entryHours: fromEntries, hours: hours2 });
+    if (hours2 > 0) days2.push({ date, rain: intervals, rainHours, entryHours: fromEntries, hours: hours2 });
   }
-  const hours = days.reduce((s, d) => s + d.hours, 0);
-  return { days, hours, claimableDays: opts.effectiveHours > 0 ? Math.floor(hours / opts.effectiveHours + 1e-9) : 0 };
+  const hours = days2.reduce((s, d) => s + d.hours, 0);
+  return { days: days2, hours, claimableDays: opts.effectiveHours > 0 ? Math.floor(hours / opts.effectiveHours + 1e-9) : 0 };
 }
 
 // packages/engine/src/control.ts
@@ -1345,11 +1345,11 @@ function scheduleProgressRows(items, statusDate, cal = {}) {
     let start = it.actualStart ?? end;
     if (it.lastRecorded && it.lastRecorded >= start) start = addDays(it.lastRecorded, 1);
     if (start > end) start = end;
-    const days = [];
-    for (let d = start; d <= end; d = addDays(d, 1)) if (isWorkingDay(d, cal)) days.push(d);
-    if (!days.length) days.push(end);
-    const each = Math.floor(delta / days.length * 1e4) / 1e4;
-    days.forEach((date, i) => rows.push({ activityId: it.activityId, date, quantity: i === days.length - 1 ? +(delta - each * (days.length - 1)).toFixed(4) : each }));
+    const days2 = [];
+    for (let d = start; d <= end; d = addDays(d, 1)) if (isWorkingDay(d, cal)) days2.push(d);
+    if (!days2.length) days2.push(end);
+    const each = Math.floor(delta / days2.length * 1e4) / 1e4;
+    days2.forEach((date, i) => rows.push({ activityId: it.activityId, date, quantity: i === days2.length - 1 ? +(delta - each * (days2.length - 1)).toFixed(4) : each }));
   }
   return rows;
 }
@@ -1488,11 +1488,11 @@ function materialStatus(materials, usage, activities, daily, deliveries, today, 
 
 // packages/engine/src/evm.ts
 var ratio = (a, b) => b > 0 ? a / b : null;
-function parteCosts(days, personnelRates, equipmentRates) {
+function parteCosts(days2, personnelRates, equipmentRates) {
   const items = [];
   const roles = /* @__PURE__ */ new Set();
   const equipment = /* @__PURE__ */ new Set();
-  for (const d of days) {
+  for (const d of days2) {
     let personal = 0;
     let equipos = 0;
     for (const [role, qty] of Object.entries(d.personnel)) {
@@ -1626,6 +1626,78 @@ function earnedValue(input) {
     readings
   };
 }
+
+// packages/engine/src/subcontractors.ts
+var ratio2 = (a, b) => b > 0 ? a / b : null;
+var days = (a, b) => Math.round((Date.parse(`${b}T12:00:00Z`) - Date.parse(`${a}T12:00:00Z`)) / 864e5);
+function subcontractorScores(input) {
+  const { cutoff } = input;
+  const dated = input.activities.filter((a) => a.plannedStart && a.plannedFinish);
+  const first = dated.reduce((m, a) => a.plannedStart < m ? a.plannedStart : m, cutoff);
+  const last = dated.reduce((m, a) => a.plannedFinish > m ? a.plannedFinish : m, cutoff);
+  const count = workdayCounter(input.calendar ?? {}, first, last);
+  const plannedQty = (a) => {
+    if (!a.plannedStart || !a.plannedFinish || cutoff < a.plannedStart) return 0;
+    if (cutoff >= a.plannedFinish) return a.contractQty;
+    const total = count(a.plannedStart, a.plannedFinish);
+    return total > 0 ? a.contractQty * count(a.plannedStart, cutoff) / total : a.contractQty;
+  };
+  const approvedQty = /* @__PURE__ */ new Map();
+  for (const e of input.approved) if (e.date <= cutoff) approvedQty.set(e.activityId, (approvedQty.get(e.activityId) ?? 0) + e.quantity);
+  const fourWeeksAgo = addDays(cutoff, -28);
+  return input.companyIds.map((companyId) => {
+    const acts = input.activities.filter((a) => a.companyId === companyId);
+    const priced = acts.filter((a) => a.unitPrice != null && a.unitPrice > 0);
+    const value = (q) => priced.reduce((t, a) => t + q(a) * a.unitPrice, 0);
+    const contractValue = value((a) => a.contractQty);
+    const executedValue = value((a) => approvedQty.get(a.id) ?? 0);
+    const plannedValue = value(plannedQty);
+    const certs = input.certificates.filter((c) => c.companyId === companyId && c.periodEnd <= cutoff).sort((a, b) => b.number - a.number);
+    const billed = certs[0]?.cumulativeAmount ?? 0;
+    const retained = certs.reduce((t, c) => t + c.retentionAmount, 0);
+    const items = input.planItems.filter((i) => i.companyId === companyId && i.done != null && i.weekStart >= fourWeeksAgo && i.weekStart <= cutoff);
+    const ppc2 = ratio2(items.filter((i) => i.done).length, items.length);
+    const nc = input.findings.filter((f) => f.companyId === companyId && (f.category === "no_conformidad" || f.category === "punch"));
+    const open = nc.filter((f) => f.status !== "closed");
+    const overdue = open.filter((f) => f.dueDate != null && f.dueDate < cutoff);
+    const closed = nc.filter((f) => f.status === "closed" && f.closedAt);
+    const ncCloseDays = closed.length ? closed.reduce((t, f) => t + days(f.createdAt, f.closedAt), 0) / closed.length : null;
+    const spi = ratio2(executedValue, plannedValue);
+    const reasons = [];
+    let red = false;
+    let amber = false;
+    if (spi != null && spi < 0.85) red = true, reasons.push(`Atrasado: ejecut\xF3 ${Math.round(spi * 100)} % de lo programado a la fecha.`);
+    else if (spi != null && spi < 0.95) amber = true, reasons.push(`Algo atrasado: ${Math.round(spi * 100)} % de lo programado.`);
+    if (overdue.length >= 3) red = true, reasons.push(`${overdue.length} no conformidades vencidas sin cerrar.`);
+    else if (overdue.length > 0) amber = true, reasons.push(`${overdue.length} no conformidad(es) vencida(s).`);
+    if (ppc2 != null && ppc2 < 0.6) red = true, reasons.push(`Cumple solo el ${Math.round(ppc2 * 100)} % de lo que compromete en el plan semanal.`);
+    else if (ppc2 != null && ppc2 < 0.8) amber = true, reasons.push(`Plan semanal cumplido al ${Math.round(ppc2 * 100)} %.`);
+    const toBill = Math.max(0, executedValue - billed);
+    if (contractValue > 0 && toBill > contractValue * 0.1) amber = true, reasons.push("Tiene m\xE1s del 10 % del contrato ejecutado y aprobado sin facturar.");
+    if (priced.length < acts.length) reasons.push(`${acts.length - priced.length} actividad(es) sin precio de subcontrato: no entran en los valores.`);
+    return {
+      companyId,
+      activities: acts.length,
+      priced: priced.length,
+      contractValue,
+      executedValue,
+      plannedValue,
+      progress: ratio2(executedValue, contractValue),
+      spi,
+      billed,
+      toBill,
+      retained,
+      lastCertificate: certs[0]?.number ?? null,
+      ppc: ppc2,
+      planItems: items.length,
+      ncOpen: open.length,
+      ncOverdue: overdue.length,
+      ncCloseDays,
+      status: red ? "red" : amber ? "amber" : "green",
+      reasons
+    };
+  });
+}
 export {
   DEFAULT_SENSITIVITY,
   DEFAULT_SHIFT_RULES,
@@ -1700,6 +1772,7 @@ export {
   scheduleProgressRows,
   sensitivity,
   staleSyncAlert,
+  subcontractorScores,
   summarizeDailyLogs,
   uniformAcceleration,
   unitCostForDays,

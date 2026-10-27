@@ -58,10 +58,30 @@ export interface ActasData {
   /** Registros aprobados (fecha y cantidad) por actividad. */
   approved: { activityId: string; date: string; quantity: number }[];
   certificates: Certificate[];
+  /** Contratos de los subcontratistas: condiciones de pago para su primera acta. */
+  subcontracts: Subcontract[];
+}
+
+export interface Subcontract {
+  id: string;
+  company_id: string;
+  contract_code: string | null;
+  scope: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  retention_pct: number;
+  advance_pct: number;
+  advance_amount: number;
+  admin_pct: number;
+  contingency_pct: number;
+  utility_pct: number;
+  vat_mode: VatMode;
+  vat_pct: number;
+  notes: string | null;
 }
 
 export async function loadActas(projectId: string): Promise<ActasData> {
-  const [p, a, e, c, cs] = await Promise.all([
+  const [p, a, e, c, cs, sc] = await Promise.all([
     supabase.from("projects").select("name, client_name, contractor_name, contract_code, report_signers, start_date").eq("id", projectId).single(),
     fetchAll((x, y) =>
       supabase
@@ -77,6 +97,7 @@ export async function loadActas(projectId: string): Promise<ActasData> {
     ),
     supabase.from("project_companies").select("id, name, kind").eq("project_id", projectId).order("kind").order("name"),
     supabase.from("payment_certificates").select("*").eq("project_id", projectId).order("issued_at", { ascending: false }),
+    supabase.from("subcontracts").select("*").eq("project_id", projectId),
   ]);
   for (const r of [p, a, e, c, cs]) if (r.error) throw new Error(r.error.message);
   return {
@@ -95,6 +116,17 @@ export async function loadActas(projectId: string): Promise<ActasData> {
     companies: (c.data ?? []) as Company[],
     approved: (e.data as { activity_id: string; work_date: string; quantity: number }[]).map((x) => ({ activityId: x.activity_id, date: x.work_date, quantity: Number(x.quantity) })),
     certificates: ((cs.data ?? []) as Certificate[]).map((x) => ({ ...x, retention_pct: Number(x.retention_pct), advance_pct: Number(x.advance_pct) })),
+    // Sin permiso (residente) o sin contratos: lista vacía
+    subcontracts: ((sc.data ?? []) as Subcontract[]).map((x) => ({
+      ...x,
+      retention_pct: Number(x.retention_pct),
+      advance_pct: Number(x.advance_pct),
+      advance_amount: Number(x.advance_amount),
+      admin_pct: Number(x.admin_pct),
+      contingency_pct: Number(x.contingency_pct),
+      utility_pct: Number(x.utility_pct),
+      vat_pct: Number(x.vat_pct),
+    })),
   };
 }
 
@@ -111,6 +143,18 @@ export function lastCertificate(data: ActasData, t: CertificateTarget) {
 /** Condiciones de la última acta del mismo destinatario (para no volver a escribirlas). */
 export function lastTerms(data: ActasData, t: CertificateTarget): Required<CertificateTerms> {
   const x = lastCertificate(data, t)?.totals;
+  // Primera acta de un subcontratista: las condiciones de su contrato
+  const sc = !x && t.kind === "empresa" ? data.subcontracts.find((s) => s.company_id === t.companyId) : undefined;
+  if (sc)
+    return {
+      retentionPct: sc.retention_pct,
+      advancePct: sc.advance_pct,
+      adminPct: sc.admin_pct,
+      contingencyPct: sc.contingency_pct,
+      utilityPct: sc.utility_pct,
+      vatMode: sc.vat_mode,
+      vatPct: sc.vat_mode !== "none" ? sc.vat_pct : 0.19,
+    };
   return {
     retentionPct: x?.retentionPct ?? 0,
     advancePct: x?.advancePct ?? 0,
