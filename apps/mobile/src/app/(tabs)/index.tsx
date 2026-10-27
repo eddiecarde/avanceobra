@@ -26,7 +26,10 @@ export default function Fronts() {
   const { data: fronts } = useQuery<{ id: string; code: string; name: string; reported_today: number }>(
     `SELECT f.id, f.code, f.name,
             (SELECT COUNT(*) FROM progress_entries e WHERE e.front_id = f.id AND e.work_date = ?) AS reported_today
-     FROM fronts f WHERE f.project_id = ? ORDER BY f.code`,
+     FROM fronts f WHERE f.project_id = ?
+       -- Un subcontratista solo recibe las actividades de su empresa: sin ellas, el frente no se muestra
+       AND EXISTS (SELECT 1 FROM activities a WHERE a.front_id = f.id)
+     ORDER BY f.code`,
     [today, projectId ?? ""],
   );
   const { data: drafts } = useQuery<{ activity_id: string; front_id: string; name: string; front: string; updated_at: string }>(

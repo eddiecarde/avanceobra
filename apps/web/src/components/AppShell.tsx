@@ -275,6 +275,9 @@ function ProjectBox() {
           <span className="block font-semibold text-white">{projects[0]!.name}</span>
         )}
       </label>
+      {memberships.some((m) => m.project_id === projectId && m.sub_company_id) ? (
+        <p className="text-xs text-amber-200">Vista de subcontratista: ves solo las actividades de tu empresa.</p>
+      ) : null}
       {isAdmin ? (
         <Link href="/nuevo-proyecto" className="block text-xs font-semibold text-blue-200 hover:text-white hover:underline">
           + Nuevo proyecto

@@ -10,6 +10,8 @@ export interface Membership {
   role: "field" | "resident" | "director" | "admin";
   /** La empresa de esta obra está suspendida por el dueño de la plataforma. */
   org_suspended?: boolean;
+  /** Si es de un subcontratista: ve solo las actividades de su empresa. */
+  sub_company_id?: string | null;
   project: { id: string; code: string; name: string; org_id: string } | null;
 }
 
@@ -70,7 +72,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }
     setLoading(true);
     void Promise.all([
-      supabase.from("memberships").select("project_id, org_id, role, org_suspended, project:projects(id, code, name, org_id)").eq("user_id", session.user.id),
+      supabase.from("memberships").select("project_id, org_id, role, org_suspended, sub_company_id, project:projects(id, code, name, org_id)").eq("user_id", session.user.id),
       supabase.from("platform_admins").select("user_id").eq("user_id", session.user.id).maybeSingle(),
     ]).then(([{ data }, owner]) => {
       const all = (data ?? []) as unknown as Membership[];

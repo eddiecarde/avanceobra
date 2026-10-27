@@ -341,7 +341,7 @@ export default function Equipo() {
 
       <Card>
         <h2 className="text-lg font-bold">Empresas</h2>
-        <p className="mb-3 text-sm text-zinc-600 dark:text-zinc-400">El contratista y sus subcontratistas en esta obra. Sirven para agrupar al equipo; no cambian lo que cada persona puede ver.</p>
+        <p className="mb-3 text-sm text-zinc-600 dark:text-zinc-400">El contratista y sus subcontratistas en esta obra. Quien es de un subcontratista ve y registra solo las actividades asignadas a su empresa (se asignan en Proyecto), sus fotos y sus hallazgos; el contratista ve toda la obra.</p>
         {companyRows.length ? (
           <ul className="mb-3 divide-y divide-zinc-100 dark:divide-zinc-800">
             {companyRows.map((c) => (
