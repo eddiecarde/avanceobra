@@ -16,7 +16,7 @@ streams:
   estructura:
     auto_subscribe: true
     with:
-      mis_proyectos: SELECT project_id FROM memberships WHERE user_id = auth.user_id()
+      mis_proyectos: SELECT project_id FROM memberships WHERE user_id = auth.user_id() AND org_suspended = false
     queries:
       - SELECT id, org_id, code, name, project_type, currency, start_date, contract_end_date, logo_path FROM projects WHERE id IN mis_proyectos
       - SELECT id, user_id, project_id, role, member_name FROM memberships WHERE project_id IN mis_proyectos
@@ -35,7 +35,7 @@ streams:
   avance:
     auto_subscribe: true
     with:
-      mis_proyectos: SELECT project_id FROM memberships WHERE user_id = auth.user_id()
+      mis_proyectos: SELECT project_id FROM memberships WHERE user_id = auth.user_id() AND org_suspended = false
     queries:
       - SELECT id, project_id, front_id, activity_id, template_version_id, work_date, quantity, effective_hours, lost_hours, loss_cause, weather, crew_size, notes, lat, lon, gps_accuracy_m, "values", status, signature_path, created_by, approved_by, approved_at, rejection_reason, device_id, client_created_at, version FROM progress_entries WHERE project_id IN mis_proyectos
       - SELECT id, project_id, entry_id, geojson, area_m2, is_approximate FROM progress_areas WHERE project_id IN mis_proyectos
@@ -45,7 +45,7 @@ streams:
   hallazgos:
     auto_subscribe: true
     with:
-      mis_proyectos: SELECT project_id FROM memberships WHERE user_id = auth.user_id()
+      mis_proyectos: SELECT project_id FROM memberships WHERE user_id = auth.user_id() AND org_suspended = false
     queries:
       - SELECT id, project_id, front_id, type, severity, status, description, lat, lon, responsible_user_id, due_date, created_by, created_at, updated_at, closed_at, version, category, impeditive, activity_id, company_id, corrective_action, verification_note, verified_at FROM findings WHERE project_id IN mis_proyectos
       # Calidad sin señal: empresas responsables y listas de chequeo activas
@@ -58,7 +58,7 @@ streams:
   plan_y_materiales:
     auto_subscribe: true
     with:
-      mis_proyectos: SELECT project_id FROM memberships WHERE user_id = auth.user_id()
+      mis_proyectos: SELECT project_id FROM memberships WHERE user_id = auth.user_id() AND org_suspended = false
     queries:
       - SELECT id, project_id, week_start, status FROM weekly_plans WHERE project_id IN mis_proyectos AND status = 'comprometido'
       - SELECT id, plan_id, project_id, activity_id, planned_qty, responsible FROM weekly_plan_items WHERE project_id IN mis_proyectos
@@ -75,7 +75,7 @@ streams:
   formatos:
     auto_subscribe: true
     with:
-      mis_empresas: SELECT org_id FROM memberships WHERE user_id = auth.user_id()
+      mis_empresas: SELECT org_id FROM memberships WHERE user_id = auth.user_id() AND org_suspended = false
     queries:
       - SELECT id, org_id, name, category, work_type, current_version, archived FROM form_templates WHERE org_id IN mis_empresas
       - SELECT id, org_id, template_id, version, schema FROM form_template_versions WHERE org_id IN mis_empresas

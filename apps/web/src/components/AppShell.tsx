@@ -88,7 +88,11 @@ function Logo({ dark }: { dark?: boolean }) {
 
 /** Marco de la web: barra lateral (computador) o menú superior (celular), usuario y control de sesión (redirige a /login). */
 export function AppShell({ children }: { children: ReactNode }) {
-  const { loading, session, isAdmin, memberships, signOut } = useSession();
+  const { loading, session, isAdmin, memberships, signOut, isPlatformAdmin, suspended } = useSession();
+  // El dueño de la plataforma ve además el panel de empresas
+  const groups = isPlatformAdmin
+    ? GROUPS.map((g) => (g.label === "Ajustes" ? { ...g, pages: [...g.pages, { href: "/dueno", label: "Panel del dueño", icon: "gauge" as const }] } : g))
+    : GROUPS;
   const path = usePathname();
   const router = useRouter();
   const isLogin = path === "/login";
@@ -96,20 +100,33 @@ export function AppShell({ children }: { children: ReactNode }) {
   const isPublic = path === "/ver";
   // El cliente (sin membresía en ningún proyecto) solo usa su portal, sin el menú del equipo
   const isClientPortal = path === "/cliente";
-  const group = GROUPS.find((g) => g.pages.some((n) => path.startsWith(n.href)));
+  const group = groups.find((g) => g.pages.some((n) => path.startsWith(n.href)));
 
   useEffect(() => {
     if (isPublic) return;
     if (!loading && !session && !isLogin) router.replace("/login");
     // Quien entró con contraseña temporal la cambia antes de seguir
     if (!loading && session?.user.user_metadata?.must_change_password && path !== "/cuenta") router.replace("/cuenta");
-    if (!loading && session && (isLogin || path === "/")) router.replace(memberships.length ? "/dashboard" : "/cliente");
-    else if (!loading && session && !memberships.length && !isClientPortal && path !== "/cuenta") router.replace("/cliente");
-  }, [loading, session, memberships.length, isLogin, isPublic, isClientPortal, path, router]);
+    if (!loading && session && (isLogin || path === "/")) router.replace(memberships.length || suspended ? "/dashboard" : "/cliente");
+    else if (!loading && session && !memberships.length && !suspended && !isClientPortal && path !== "/cuenta") router.replace("/cliente");
+  }, [loading, session, memberships.length, suspended, isLogin, isPublic, isClientPortal, path, router]);
 
   if (isLogin || isPublic) return <>{children}</>;
   if (loading || !session) return <div className="p-8 text-zinc-500">Cargando…</div>;
   if (isClientPortal) return <>{children}</>;
+  if (suspended && path !== "/cuenta")
+    return (
+      <div className="mx-auto max-w-lg p-8">
+        <Logo />
+        <h1 className="mt-6 text-2xl font-extrabold">Tu empresa está suspendida</h1>
+        <p className="mt-2 text-zinc-600 dark:text-zinc-400">
+          Los datos de tus obras se conservan, pero por ahora no se puede entrar. Comunícate con el administrador de AvanceObra para reactivarla.
+        </p>
+        <button onClick={() => void signOut()} className="mt-6 rounded-lg border border-zinc-300 px-4 py-2 font-semibold dark:border-zinc-700">
+          Salir
+        </button>
+      </div>
+    );
 
   const email = session.user.email ?? "";
   const name = (session.user.user_metadata?.full_name as string | undefined)?.trim() || email.split("@")[0]!;
@@ -129,7 +146,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <Logo dark />
         </div>
         <nav aria-label="Menú principal" className="flex-1 space-y-4 overflow-y-auto px-3 pb-4">
-          {GROUPS.map((g) => (
+          {groups.map((g) => (
             <div key={g.label}>
               <div className="px-3 pb-1 text-[11px] font-bold uppercase tracking-widest text-blue-200/50">{g.label}</div>
               {g.pages.map((n) => {
@@ -169,7 +186,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
             {/* Celular: grupos arriba */}
             <nav aria-label="Secciones" className="order-last -mx-1 flex w-full gap-0.5 overflow-x-auto px-1 sm:gap-1 md:order-none md:w-auto lg:hidden">
-              {GROUPS.map((g) => (
+              {groups.map((g) => (
                 <Link key={g.label} href={g.pages[0]!.href} aria-current={g === group ? "true" : undefined} className={cx(tab(g === group), "px-2 text-sm sm:px-3 sm:text-[15px]")}>
                   {g.label}
                 </Link>

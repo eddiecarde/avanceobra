@@ -8,6 +8,8 @@ export interface Membership {
   project_id: string;
   org_id: string;
   role: "field" | "resident" | "director" | "admin";
+  /** La empresa de esta obra está suspendida por el dueño de la plataforma. */
+  org_suspended?: boolean;
   project: { id: string; code: string; name: string; org_id: string } | null;
 }
 
@@ -25,6 +27,10 @@ interface SessionState {
   signOut: () => Promise<void>;
   /** Vuelve a leer las obras del usuario (p. ej. después de crear una). */
   reloadMemberships: () => void;
+  /** Dueño de la plataforma: ve el panel de empresas. */
+  isPlatformAdmin: boolean;
+  /** Todas las obras del usuario son de empresas suspendidas. */
+  suspended: boolean;
 }
 
 const PROJECT_KEY = "avanceobra:proyecto-actual";
@@ -37,6 +43,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   // De qué usuario son las membresías cargadas: mientras no sean las de la sesión actual, sigue cargando
   const [membershipsOf, setMembershipsOf] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
+  const [suspendedOnly, setSuspendedOnly] = useState(false);
   const [loading, setLoading] = useState(true);
   const [currentProjectId, setCurrent] = useState(() => {
     try {
@@ -61,15 +69,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       return;
     }
     setLoading(true);
-    supabase
-      .from("memberships")
-      .select("project_id, org_id, role, project:projects(id, code, name, org_id)")
-      .eq("user_id", session.user.id)
-      .then(({ data }) => {
-        setMemberships((data ?? []) as unknown as Membership[]);
-        setMembershipsOf(session.user.id);
-        setLoading(false);
-      });
+    void Promise.all([
+      supabase.from("memberships").select("project_id, org_id, role, org_suspended, project:projects(id, code, name, org_id)").eq("user_id", session.user.id),
+      supabase.from("platform_admins").select("user_id").eq("user_id", session.user.id).maybeSingle(),
+    ]).then(([{ data }, owner]) => {
+      const all = (data ?? []) as unknown as Membership[];
+      // Las obras de empresas suspendidas no se muestran (la base de datos tampoco deja leerlas)
+      setMemberships(all.filter((m) => !m.org_suspended));
+      setSuspendedOnly(all.length > 0 && all.every((m) => m.org_suspended));
+      setIsPlatformAdmin(!!owner.data);
+      setMembershipsOf(session.user.id);
+      setLoading(false);
+    });
   }, [session, reloadKey]);
 
   const value = useMemo<SessionState>(() => {
@@ -96,8 +107,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         await supabase.auth.signOut();
       },
       reloadMemberships: () => setReloadKey((k) => k + 1),
+      isPlatformAdmin,
+      suspended: suspendedOnly,
     };
-  }, [loading, session, memberships, membershipsOf, currentProjectId]);
+  }, [loading, session, memberships, membershipsOf, currentProjectId, isPlatformAdmin, suspendedOnly]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

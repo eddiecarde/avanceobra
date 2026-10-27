@@ -5,7 +5,7 @@ import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 export async function fanOut(db: SupabaseClient, req: Request, fn: string, body: Record<string, unknown>): Promise<Response> {
   // La URL pública de la función (req.url dentro del entorno de Supabase es interna)
   const url = `${Deno.env.get("SUPABASE_URL")}/functions/v1/${fn}`;
-  const { data: projects, error } = await db.from("projects").select("id, name");
+  const { data: projects, error } = await db.from("projects").select("id, name").eq("suspended", false);
   if (error) return Response.json({ error: error.message }, { status: 500 });
   const results: unknown[] = [];
   for (const p of projects ?? []) {

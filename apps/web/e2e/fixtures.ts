@@ -114,7 +114,7 @@ export function buildDb(role: "admin" | "resident" | "field" = "admin"): MockDb 
     site_plans: [],
     photos: [],
     daily_log_latest: [
-      { project_id: PROJECT_ID, log_date: day(-1), personnel: [{ role: "Oficial de obra", qty: 4 }, { role: "Auxiliar de obra", qty: 8 }], equipment: [{ name: "Hincadora", qty: 2 }], rain: [{ start: "10:00", end: "10:45" }], observations: "Lluvia corta" },
+      { project_id: PROJECT_ID, log_date: day(0), personnel: [{ role: "Oficial de obra", qty: 4 }, { role: "Auxiliar de obra", qty: 8 }], equipment: [{ name: "Hincadora", qty: 2 }], rain: [{ start: "10:00", end: "10:45" }], observations: "Lluvia corta" },
     ],
     lab_tests: [{ id: "t1", project_id: PROJECT_ID, activity_id: "a4", name: "Densidad en campo", standard: "INV E-161", sample_date: day(-2), sent_date: day(-1), lab: "Lab. Costa", status: "enviado", result: null, observation: null, updated_at: `${day(-1)}T15:00:00Z` }],
     project_constraints: [{ id: "c1", project_id: PROJECT_ID, activity_id: null, description: "Falta permiso de servidumbre", responsible: "Cliente", need_by: day(2), status: "abierta", released_at: null, created_at: `${day(-3)}T15:00:00Z` }],

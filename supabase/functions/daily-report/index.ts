@@ -28,7 +28,7 @@ Deno.serve(async (req) => {
 
   // Sin proyecto: una llamada por proyecto (cada una con su propio cómputo)
   if (!body.project_id) return fanOut(db, req, "daily-report", body);
-  let q = db.from("projects").select("id, name");
+  let q = db.from("projects").select("id, name").eq("suspended", false);
   if (body.project_id) q = q.eq("id", body.project_id);
   const { data: projects, error } = await q;
   if (error) return Response.json({ error: error.message }, { status: 500 });
