@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { localToday } from "@/lib/dashboard";
 import { useSession } from "@/lib/session";
 import { supabase } from "@/lib/supabase";
 import { fetchWeather, type Weather } from "@/lib/weather";
@@ -43,6 +44,7 @@ const GROUPS: { label: string; pages: Page[] }[] = [
   {
     label: "Campo",
     pages: [
+      { href: "/asistente", label: "Asistente IA", icon: "sparkle" as IconName },
       { href: "/registros", label: "Registros", icon: "list" },
       { href: "/calidad", label: "Calidad", icon: "check" },
       { href: "/control", label: "Ensayos y restricciones", icon: "flask" },
@@ -334,7 +336,7 @@ function PlanBanner() {
 
   const paidUntil = plan?.orgId === orgId ? plan.paidUntil : null;
   if (!paidUntil) return null;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localToday();
   const days = Math.round((Date.parse(`${paidUntil}T12:00:00Z`) - Date.parse(`${today}T12:00:00Z`)) / 86_400_000);
   if (days > 7) return null;
   const date = new Date(`${paidUntil}T12:00:00Z`).toLocaleDateString("es-CO", { day: "numeric", month: "long", year: "numeric" });

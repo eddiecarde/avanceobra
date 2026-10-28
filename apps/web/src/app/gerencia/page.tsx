@@ -1,105 +1,12 @@
 "use client";
 
-import { diffDays, materialStatus, penaltyCost, penaltyFromPercent, ppc, sCurve } from "@avanceobra/engine";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Badge, Card, cx } from "@/components/ui";
-import { fetchAll, loadDashboard, localToday, pct, type DashData } from "@/lib/dashboard";
+import { AiSummary } from "@/components/AiSummary";
+import { localToday, pct } from "@/lib/dashboard";
+import { loadRow, M, summaryFacts, type Row } from "@/lib/gerencia";
 import { useSession } from "@/lib/session";
-import { supabase } from "@/lib/supabase";
-
-interface Row {
-  id: string;
-  name: string;
-  actual: number;
-  planned: number;
-  spi: number | null;
-  projectedFinish: string | null;
-  contractEnd: string | null;
-  delayDays: number | null;
-  penalty: number | null;
-  ppc: number | null;
-  ppcWeek: string | null;
-  critical: number;
-  impeditive: number;
-  overdue: number;
-  materialsLow: string[];
-  billed: number | null;
-  contractValue: number | null;
-}
-
-const M = (n: number) => `$${(n / 1e6).toLocaleString("es-CO", { maximumFractionDigits: 1 })} M`;
-
-/** Lo que gerencia necesita de cada obra, en una sola página y lado a lado. */
-async function loadRow(projectId: string, today: string): Promise<Row> {
-  const [dash, contract, plans, items, mats, usage, deliveries, certs] = await Promise.all([
-    loadDashboard(projectId),
-    supabase.from("contracts").select("*").eq("project_id", projectId).maybeSingle(),
-    supabase.from("weekly_plans").select("id, week_start").eq("project_id", projectId).eq("status", "cerrado").order("week_start", { ascending: false }).limit(1),
-    supabase.from("weekly_plan_items").select("plan_id, done").eq("project_id", projectId),
-    supabase.from("materials").select("id, name, unit, low_days").eq("project_id", projectId),
-    fetchAll((a, b) => supabase.from("material_usage").select("material_id, activity_id, factor").eq("project_id", projectId).order("material_id").order("activity_id").range(a, b)),
-    supabase.from("material_deliveries").select("material_id, delivered_on, quantity").eq("project_id", projectId),
-    supabase.from("payment_certificates").select("totals, number, status").eq("project_id", projectId).is("company_id", null).eq("status", "emitida").order("number", { ascending: false }).limit(1),
-  ]);
-  const d: DashData = dash;
-  const cal = d.project.calendar;
-  const starts = d.activities.map((a) => a.plannedStart).filter(Boolean) as string[];
-  const from = d.project.startDate ?? starts.sort()[0] ?? today;
-  const to = d.project.contractEnd ?? today;
-  const groups = d.activities.some((a) => a.workGroup) ? new Map(d.activities.map((a) => [a.id, a.workGroup])) : null;
-  const curve = sCurve({
-    activities: d.activities,
-    daily: d.daily.filter((x) => x.date <= today),
-    from,
-    to: to < today ? today : to,
-    today,
-    calendar: cal,
-    ...(groups ? { groupOf: (id: string) => groups.get(id) ?? null, rateWindowDays: 21 } : {}),
-  });
-  const delayDays = curve.projectedFinish && d.project.contractEnd ? diffDays(d.project.contractEnd, curve.projectedFinish) : null;
-  const c = contract.data as Record<string, number | string | null> | null;
-  let penalty: number | null = null;
-  if (c && delayDays != null) {
-    const value = Number(c.contract_value);
-    const terms =
-      c.penalty_mode === "percent"
-        ? { ...penaltyFromPercent(value, Number(c.penalty_percent_per_day), c.penalty_cap_percent == null ? undefined : Number(c.penalty_cap_percent)), dailyIndirectCost: 0 }
-        : { penaltyPerDay: Number(c.penalty_per_day), penaltyCap: c.penalty_cap_percent == null ? null : value * Number(c.penalty_cap_percent), dailyIndirectCost: 0 };
-    penalty = penaltyCost(Math.max(0, delayDays), terms);
-  }
-  const lastPlan = (plans.data ?? [])[0] as { id: string; week_start: string } | undefined;
-  const open = d.findings.filter((f) => f.status !== "closed");
-  const mrows = materialStatus(
-    ((mats.data ?? []) as { id: string; name: string; unit: string; low_days: number }[]).map((m) => ({ id: m.id, name: m.name, unit: m.unit, lowDays: m.low_days })),
-    (usage.data as { material_id: string; activity_id: string; factor: number }[]).map((u) => ({ materialId: u.material_id, activityId: u.activity_id, factor: Number(u.factor) })),
-    d.activities,
-    d.daily,
-    ((deliveries.data ?? []) as { material_id: string; delivered_on: string; quantity: number }[]).map((x) => ({ materialId: x.material_id, date: x.delivered_on, quantity: Number(x.quantity) })),
-    today,
-    cal,
-  );
-  const cert = (certs.data ?? [])[0] as { totals: { cumulativeAmount: number; contractAmount: number } } | undefined;
-  return {
-    id: projectId,
-    name: d.project.name,
-    actual: curve.actualToday,
-    planned: curve.plannedToday,
-    spi: curve.spi,
-    projectedFinish: curve.projectedFinish,
-    contractEnd: d.project.contractEnd,
-    delayDays,
-    penalty,
-    ppc: lastPlan ? ppc(((items.data ?? []) as { plan_id: string; done: boolean | null }[]).filter((i) => i.plan_id === lastPlan.id)) : null,
-    ppcWeek: lastPlan?.week_start ?? null,
-    critical: open.filter((f) => f.severity === "critical").length,
-    impeditive: open.filter((f) => f.impeditive).length,
-    overdue: open.filter((f) => f.dueDate && f.dueDate < today).length,
-    materialsLow: mrows.filter((m) => m.status === "low" || m.status === "out").map((m) => m.name),
-    billed: cert ? cert.totals.cumulativeAmount : null,
-    contractValue: cert ? cert.totals.contractAmount : c ? Number(c.contract_value) : null,
-  };
-}
 
 /** Vista de gerencia: todas las obras lado a lado, de la más comprometida a la más tranquila. */
 export default function Gerencia() {
@@ -108,6 +15,7 @@ export default function Gerencia() {
   const projects = useMemo(() => [...new Map(memberships.filter((m) => m.project).map((m) => [m.project_id, m.project!])).values()], [memberships]);
   const today = localToday();
   const [rows, setRows] = useState<Record<string, Row | { error: string }>>({});
+  const [aiFor, setAiFor] = useState<string | null>(null);
 
   useEffect(() => {
     let off = false;
@@ -169,6 +77,10 @@ export default function Gerencia() {
           </Card>
         ))}
 
+      {aiFor && rows[aiFor] && !("error" in rows[aiFor]) ? (
+        <AiSummary key={aiFor} projectId={aiFor} title={(rows[aiFor] as Row).name} facts={summaryFacts(rows[aiFor] as Row, today)} onClose={() => setAiFor(null)} />
+      ) : null}
+
       <Card>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[1100px] text-left text-sm">
@@ -229,6 +141,13 @@ export default function Gerencia() {
                     </button>
                     <button className="font-semibold text-blue-700 hover:underline dark:text-blue-400" onClick={() => open(r.id, "/simulador")}>
                       Multa
+                    </button>
+                    <button
+                      className="font-semibold text-blue-700 hover:underline dark:text-blue-400"
+                      onClick={() => setAiFor(r.id)}
+                      aria-label={`Resumen con IA de ${r.name}`}
+                    >
+                      Resumen IA
                     </button>
                   </td>
                 </tr>

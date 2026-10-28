@@ -1,15 +1,18 @@
 import type { FindingType, Severity } from "@avanceobra/shared";
 import { addDays } from "@avanceobra/engine";
+import { File } from "expo-file-system";
 import { useQuery } from "@powersync/react";
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
 import { Alert } from "react-native";
 import { CATEGORY_LABEL, SEVERITY_LABEL, TYPE_LABEL, type FindingCategory } from "../../core/findings";
+import { callAi } from "../../services/ai";
 import { createFinding } from "../../services/findings";
 import { todayLocal } from "../../services/ids";
 import { getFix, type Fix } from "../../services/location";
 import { useSession } from "../../state/session";
-import { BigButton, Body, Chips, Input, Label, Screen } from "../../ui/components";
+import { AiMarks, type AiMarksData } from "../../ui/AiMarks";
+import { BigButton, Body, Card, Chips, Input, Label, Screen } from "../../ui/components";
 import { PhotoStrip } from "../../ui/PhotoStrip";
 import { usePhotoCapture } from "../../ui/usePhotoCapture";
 
@@ -21,14 +24,16 @@ const DUE_DAYS: Record<Severity, number> = { critical: 1, high: 3, medium: 7, lo
 
 export default function NuevoHallazgo() {
   const { projectId, userId, userName } = useSession();
-  // Desde Calidad se abre con ?categoria=no_conformidad o punch
-  const params = useLocalSearchParams<{ categoria?: FindingCategory }>();
+  // Desde Calidad se abre con ?categoria=no_conformidad o punch; desde el parte dictado, con la descripción
+  const params = useLocalSearchParams<{ categoria?: FindingCategory; descripcion?: string; tipo?: FindingType; severidad?: Severity }>();
   const [category, setCategory] = useState<FindingCategory>(params.categoria && params.categoria in CATEGORY_LABEL ? params.categoria : "observacion");
   const [impeditive, setImpeditive] = useState(false);
   const [activityId, setActivityId] = useState<string | null>(null);
-  const [type, setType] = useState<FindingType>("quality");
-  const [severity, setSeverity] = useState<Severity>("medium");
-  const [description, setDescription] = useState("");
+  const [type, setType] = useState<FindingType>(params.tipo && params.tipo in TYPE_LABEL ? params.tipo : "quality");
+  const [severity, setSeverity] = useState<Severity>(params.severidad && params.severidad in SEVERITY_LABEL ? params.severidad : "medium");
+  const [description, setDescription] = useState(params.descripcion ?? "");
+  const [aiBusy, setAiBusy] = useState(false);
+  const [ai, setAi] = useState<{ title: string; is_defect: boolean; marks: AiMarksData; uri: string } | null>(null);
   const [frontId, setFrontId] = useState<string | null>(null);
   const [responsible, setResponsible] = useState<string | null>(null);
   const [fix, setFix] = useState<Fix | null>(null);
@@ -48,6 +53,34 @@ export default function NuevoHallazgo() {
   useEffect(() => {
     getFix().then(setFix).catch(() => undefined);
   }, []);
+
+  /** Muse Spark (Meta) lee la foto: tipo, severidad, descripción y acción correctiva; SAM 3.1 marca el defecto. */
+  async function analyze() {
+    const photo = cam.photos[0];
+    if (!photo || !projectId) return;
+    setAiBusy(true);
+    try {
+      const image = await new File(photo.uri).base64();
+      const r = await callAi<{
+        analysis: { is_defect: boolean; type: FindingType; severity: Severity; title: string; description: string; corrective_action: string };
+        marks: AiMarksData;
+      }>("defect", { project_id: projectId, image_base64: image, note: description });
+      if (r.data === null) return Alert.alert("No se pudo analizar", r.error);
+      const a = r.data.analysis;
+      setAi({ title: a.title, is_defect: a.is_defect, marks: r.data.marks, uri: photo.uri });
+      if (!a.is_defect) return Alert.alert("La IA no ve un defecto", "Revisa la foto o describe el hallazgo a mano.");
+      setType(a.type);
+      setSeverity(a.severity);
+      const typed = description.trim();
+      setDescription(
+        [typed, `${a.title}. ${a.description}`, a.corrective_action ? `Acción correctiva sugerida (IA): ${a.corrective_action}` : ""].filter(Boolean).join("\n\n"),
+      );
+    } catch (e) {
+      Alert.alert("No se pudo analizar", String((e as Error).message ?? e));
+    } finally {
+      setAiBusy(false);
+    }
+  }
 
   async function save() {
     if (!projectId || !userId) return;
@@ -91,6 +124,14 @@ export default function NuevoHallazgo() {
       <Input value={description} onChangeText={setDescription} multiline style={{ minHeight: 110, textAlignVertical: "top" }} />
       <BigButton title={`📷 Foto (${cam.photos.length}/5)`} loading={cam.busy} onPress={() => void cam.capture()} />
       <PhotoStrip photos={cam.photos} onRemove={cam.remove} />
+      {cam.photos.length ? <BigButton title="✨ Analizar la foto con IA" loading={aiBusy} onPress={() => void analyze()} /> : null}
+      {ai ? (
+        <Card>
+          <Label>{ai.is_defect ? `IA: ${ai.title}` : "IA: no ve un defecto en la foto"}</Label>
+          {ai.marks.boxes.length ? <AiMarks uri={ai.uri} marks={ai.marks} /> : null}
+          <Body muted>Muse Spark y SAM 3.1 (Meta) sugieren tipo, severidad, descripción y acción correctiva. Revísalo antes de guardar.</Body>
+        </Card>
+      ) : null}
       <Label>Frente</Label>
       <Chips options={fronts.map((f) => ({ value: f.id, label: f.code }))} value={frontId} onChange={setFrontId} />
       <Label>{category === "observacion" ? "Actividad (opcional)" : "Actividad"}</Label>

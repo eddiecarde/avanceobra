@@ -13,6 +13,10 @@ export interface DailyLogDraft {
   equipment: Record<string, number>;
   rain: RainEvent[];
   observations: string;
+  /** Lo que dictó el supervisor (se guarda aunque no haya señal). */
+  dictation?: string;
+  /** Lo que devolvió el asistente (avances y hallazgos pendientes de registrar). */
+  ai?: import("./dictation").ParsedReport | null;
 }
 
 /** Si el administrador no ha definido catálogos (o no hay señal la primera vez). */

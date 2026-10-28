@@ -2,7 +2,9 @@
 
 import { addDays } from "@avanceobra/engine";
 import { Fragment, useEffect, useMemo, useState } from "react";
+import { AiCheckBadge, AiCheckDetail, type EntryAiCheck } from "@/components/AiCheck";
 import { Badge, Button, Card, cx, Field, Input, Select, Textarea } from "@/components/ui";
+import { callAi } from "@/lib/ai";
 import { localToday, LOSS_LABEL } from "@/lib/dashboard";
 import { useSession } from "@/lib/session";
 import { supabase } from "@/lib/supabase";
@@ -104,6 +106,10 @@ export default function Registros() {
   const [editing, setEditing] = useState<{ entry: Entry; form: Record<keyof Fields, string>; reason: string } | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [history, setHistory] = useState<string | null>(null);
+  // Verificación con IA (SAM 3.1 + Muse Spark) por registro
+  const [checks, setChecks] = useState<Record<string, EntryAiCheck>>({});
+  const [checking, setChecking] = useState<string | null>(null);
+  const [aiOpen, setAiOpen] = useState<string | null>(null);
 
   useEffect(() => {
     if (!projectId) return;
@@ -124,11 +130,13 @@ export default function Registros() {
       q,
       supabase.from("entry_corrections").select("*").eq("project_id", projectId).order("requested_at", { ascending: false }).limit(300),
       supabase.from("memberships").select("user_id, member_name").eq("project_id", projectId),
-    ]).then(([a, e, c, m]) => {
+      supabase.from("entry_ai_checks").select("*").eq("project_id", projectId).order("checked_at", { ascending: false }).limit(1000),
+    ]).then(([a, e, c, m, k]) => {
       if (off) return;
       setActs((a.data ?? []) as Activity[]);
       setEntries(((e.data ?? []) as Entry[]).map((x) => ({ ...x, quantity: Number(x.quantity) })));
       setCorrections((c.data ?? []) as Correction[]);
+      setChecks(Object.fromEntries(((k.data ?? []) as EntryAiCheck[]).map((x) => [x.entry_id, { ...x, reported: Number(x.reported) }])));
       setNames(Object.fromEntries((m.data ?? []).map((x: { user_id: string; member_name: string | null }) => [x.user_id, x.member_name ?? ""])));
       if (e.error) setMsg({ tone: "error", text: e.error.message });
     });
@@ -138,6 +146,17 @@ export default function Registros() {
   }, [projectId, from, to, activity, status, version]);
 
   const actOf = (id: string) => acts.find((a) => a.id === id);
+
+  /** SAM 3.1 cuenta lo que se ve en las fotos y Muse Spark revisa que correspondan a la actividad. */
+  async function verify(id: string) {
+    setChecking(id);
+    setMsg(null);
+    const r = await callAi<EntryAiCheck>("verify_entry", { entry_id: id, project_id: projectId });
+    setChecking(null);
+    if (r.data === null) return setMsg({ tone: "error", text: r.error });
+    setChecks((s) => ({ ...s, [id]: { ...r.data, reported: Number(r.data.reported) } }));
+    setAiOpen(id);
+  }
   const who = (id: string | null) => (!id ? "—" : id === me ? "tú" : names[id] || "otra persona");
   const pending = corrections.filter((c) => c.status === "pendiente");
   const entryOfCorrection = (c: Correction) => entries.find((e) => e.id === c.entry_id);
@@ -339,6 +358,11 @@ export default function Registros() {
                         {e.version > 1 && done.some((c) => c.status === "aprobada") ? <span className="ml-1 text-xs text-zinc-500">corregido</span> : null}
                         {open ? <div className="text-xs font-semibold text-amber-700">Corrección pendiente</div> : null}
                         {e.status === "rejected" && e.rejection_reason ? <div className="text-xs text-red-700">{e.rejection_reason}</div> : null}
+                        {checks[e.id] ? (
+                          <button className="mt-1 block" onClick={() => setAiOpen(aiOpen === e.id ? null : e.id)} aria-expanded={aiOpen === e.id} aria-label="Ver verificación con IA">
+                            <AiCheckBadge check={checks[e.id]} />
+                          </button>
+                        ) : null}
                       </td>
                       <td className="py-2 pr-3">{who(e.created_by)}</td>
                       <td className="py-2 text-right">
@@ -359,6 +383,11 @@ export default function Registros() {
                               </Button>
                             </>
                           ) : null}
+                          {canDecide ? (
+                            <Button size="sm" variant="ghost" disabled={checking !== null} onClick={() => void verify(e.id)}>
+                              {checking === e.id ? "Verificando…" : checks[e.id] ? "Verificar de nuevo" : "Verificar con IA"}
+                            </Button>
+                          ) : null}
                           {canRequest ? (
                             <Button size="sm" onClick={() => startCorrection(e)}>
                               Pedir corrección
@@ -372,6 +401,13 @@ export default function Registros() {
                         </div>
                       </td>
                     </tr>
+                    {aiOpen === e.id && checks[e.id] ? (
+                      <tr className="border-b border-zinc-100 bg-blue-50/40 dark:border-zinc-800 dark:bg-blue-950/20">
+                        <td colSpan={7} className="p-3">
+                          <AiCheckDetail check={checks[e.id]} unit={a?.unit ?? ""} />
+                        </td>
+                      </tr>
+                    ) : null}
                     {editing?.entry.id === e.id ? (
                       <tr className="border-b border-zinc-100 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900">
                         <td colSpan={7} className="p-3">

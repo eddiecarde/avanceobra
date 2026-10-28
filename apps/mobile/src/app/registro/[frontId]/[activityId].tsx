@@ -54,7 +54,8 @@ const fmt = (n: number) => n.toLocaleString("es-CO", { maximumFractionDigits: 2 
  * Todo se guarda como borrador mientras se escribe: salir de la pantalla no pierde nada.
  */
 export default function Capture() {
-  const { frontId, activityId } = useLocalSearchParams<{ frontId: string; activityId: string }>();
+  // cantidad y nota llegan del parte dictado (Muse Spark)
+  const { frontId, activityId, cantidad, nota } = useLocalSearchParams<{ frontId: string; activityId: string; cantidad?: string; nota?: string }>();
   const { projectId, userId, userName } = useSession();
   const t = useTheme();
   const today = todayLocal();
@@ -158,7 +159,15 @@ export default function Capture() {
         setRestoredLabel(`${old ? "⚠ Borrador antiguo" : "Borrador recuperado"} (${draftTimeLabel(d)})`);
       })
       .catch(() => undefined)
-      .finally(() => alive && setDraftLoaded(true));
+      .finally(() => {
+        if (!alive) return;
+        if (cantidad) setQuantity(cantidad);
+        if (nota) {
+          setNotes(nota);
+          setMore(true);
+        }
+        setDraftLoaded(true);
+      });
     getFix()
       .then((f) => {
         setFix(f);

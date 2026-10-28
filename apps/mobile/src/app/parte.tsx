@@ -1,9 +1,11 @@
 import { useQuery } from "@powersync/react";
-import { Stack } from "expo-router";
+import { router, Stack } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, KeyboardAvoidingView, Platform, Pressable, Text, View } from "react-native";
 import { DEFAULT_EQUIPMENT, DEFAULT_ROLES, emptyDraft, normalizeTime, nowColombia, rainMinutes, toDailyLogRow, validateDraft, type DailyLogDraft } from "../core/dailyLog";
+import { applyReport, dictatedProgress, type ParsedReport } from "../core/dictation";
 import { db } from "../db/database";
+import { callAi } from "../services/ai";
 import { newId, nowIso, todayLocal } from "../services/ids";
 import { supabase } from "../services/supabase";
 import { useSession } from "../state/session";
@@ -69,8 +71,13 @@ export default function Parte() {
   const [rainStart, setRainStart] = useState("");
   const [rainEnd, setRainEnd] = useState("");
   const loadedKey = useRef<string | null>(null);
+  const [aiBusy, setAiBusy] = useState(false);
 
   const { data: fronts } = useQuery<{ id: string; code: string; name: string }>("SELECT id, code, name FROM fronts WHERE project_id = ? ORDER BY code", [projectId ?? ""]);
+  const { data: activities } = useQuery<{ id: string; code: string; name: string; unit: string; front_id: string }>(
+    "SELECT id, code, name, unit, front_id FROM activities WHERE project_id = ? ORDER BY code",
+    [projectId ?? ""],
+  );
   const { data: catalogs } = useQuery<{ personnel_roles: string; equipment_types: string }>("SELECT personnel_roles, equipment_types FROM project_catalogs WHERE id = ?", [projectId ?? ""]);
 
   // Catálogos del proyecto: se actualizan si hay señal; si no, se usan los guardados o los de fábrica
@@ -152,6 +159,28 @@ export default function Parte() {
     setRainEnd("");
   }
 
+  /** Muse Spark (Meta) convierte lo dictado en el parte; el supervisor revisa antes de enviar. */
+  async function fillWithAi() {
+    if (!projectId) return;
+    setAiBusy(true);
+    const r = await callAi<{ report: ParsedReport }>("parse_report", {
+      project_id: projectId,
+      text: draft.dictation ?? "",
+      front_id: front === ALL ? null : front,
+    });
+    setAiBusy(false);
+    if (r.data === null) return Alert.alert("No se pudo llenar con IA", r.error);
+    const report = r.data.report;
+    setDraft((d) => ({ ...applyReport(d, report, { roles, equipment }), dictation: d.dictation, ai: report }));
+    const n = report.personnel.length + report.equipment.length + report.rain.length;
+    Alert.alert(
+      "Parte llenado con IA",
+      `${n} dato(s) de personal, equipos y lluvia quedaron en el parte. Revísalos antes de enviar.` +
+        (report.progress.length || report.findings.length ? " Abajo de lo dictado están los avances y hallazgos para registrar." : ""),
+    );
+  }
+  const dictated = draft.ai ? dictatedProgress(draft.ai, activities) : [];
+
   async function send() {
     if (!projectId || !userId) return;
     const errors = validateDraft(draft);
@@ -194,6 +223,44 @@ export default function Parte() {
         {submittedAt ? (
           <Card accent={t.success}>
             <Body>{`✓ Enviado a las ${nowColombia(new Date(submittedAt))}. Puedes corregir y volver a enviar.`}</Body>
+          </Card>
+        ) : null}
+
+        <Title>🎙 Dictar el parte</Title>
+        <Body muted>
+          Toca el micrófono del teclado y cuenta el día: qué hicieron y cuánto, cuánta gente y qué equipos, si llovió (de qué hora a qué hora) y los problemas.
+          La IA de Meta (Muse Spark) llena el parte y tú lo revisas antes de enviar.
+        </Body>
+        <Input
+          value={draft.dictation ?? ""}
+          onChangeText={(s) => setDraft((d) => ({ ...d, dictation: s }))}
+          placeholder="Ej.: hoy hincamos 120 pilotes en el subcampo 3 con 2 hincadoras, 4 oficiales y 6 ayudantes; llovió de 10 a 11; hay un pilote torcido en la fila 4"
+          multiline
+          accessibilityLabel="Texto dictado del parte"
+          style={{ minHeight: 110, textAlignVertical: "top", paddingTop: 12 }}
+        />
+        <BigButton title="✨ Llenar el parte con IA" loading={aiBusy} disabled={(draft.dictation ?? "").trim().length < 8} onPress={() => void fillWithAi()} />
+        {draft.ai && (dictated.length || draft.ai.findings.length || draft.ai.unmatched.length) ? (
+          <Card accent={t.primary}>
+            {dictated.length ? <Label>Avance dictado: tócalo para registrarlo con su foto</Label> : null}
+            {dictated.map((p) => (
+              <BigButton
+                key={p.activityId}
+                title={`${p.code} · ${p.name}: ${p.quantity} ${p.unit}`}
+                onPress={() =>
+                  router.push({ pathname: "/registro/[frontId]/[activityId]", params: { frontId: p.frontId, activityId: p.activityId, cantidad: String(p.quantity), nota: p.note } })
+                }
+              />
+            ))}
+            {draft.ai.findings.length ? <Label>Problemas dictados: tócalos para crear el hallazgo</Label> : null}
+            {draft.ai.findings.map((f, i) => (
+              <BigButton
+                key={`${i}-${f.description}`}
+                title={`⚠ ${f.description}`}
+                onPress={() => router.push({ pathname: "/hallazgo/nuevo", params: { descripcion: f.description, tipo: f.type, severidad: f.severity } })}
+              />
+            ))}
+            {draft.ai.unmatched.length ? <Body muted>{`No se pudo ubicar: ${draft.ai.unmatched.join("; ")}. Regístralo a mano.`}</Body> : null}
           </Card>
         ) : null}
 
