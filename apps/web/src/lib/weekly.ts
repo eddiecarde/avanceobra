@@ -91,6 +91,8 @@ export interface WeeklyReport {
   dailyQty: Map<string, number[]>;
   dayInfo: { date: string; crew: number; entries: number; weather: string | null; rainHours: number; lostHours: number }[];
   alerts: string[];
+  /** Alertas sin las desviaciones por actividad (esas van en el análisis de desviaciones). */
+  risks: string[];
   photos: { url: string; caption: string; date: string }[];
   /** Parte diario resumido por día de la semana (null si nadie lo envió). */
   logs: (DailyLogSummary | null)[];
@@ -141,23 +143,26 @@ export function buildWeeklyReport(data: DashData, weekIndex: number, today: stri
       // Con parte diario, el personal es el del parte; si no, la suma de las cuadrillas de los registros
       crew: logs[i]?.totalPersonnel ?? es.reduce((s, e) => s + e.crewSize, 0),
       weather: [...weather.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null,
-      rainHours: es.filter((e) => e.lossCause === "weather").reduce((s, e) => s + e.lostHours, 0),
-      lostHours: es.filter((e) => e.lossCause !== "none").reduce((s, e) => s + e.lostHours, 0),
+      rainHours: es.flatMap((e) => e.losses).filter((l) => l.cause === "weather").reduce((s, l) => s + l.hours, 0),
+      lostHours: es.flatMap((e) => e.losses).reduce((s, l) => s + l.hours, 0),
     };
   });
 
   // Alertas y restricciones: atrasos, causas de pérdida y hallazgos de la semana
   const alerts: string[] = [];
   const pos = weekPos;
+  const fecha = (d: string) => d.split("-").reverse().join("/");
+  const ptsTxt = (x: number) => `${x > 0 ? "+" : ""}${(x * 100).toLocaleString("es-CO", { maximumFractionDigits: 1 })} pts`;
   progress.rows
     .filter((r) => r.actual[pos] != null && r.planned[pos]! - (r.actual[pos] ?? 0) > 0.1)
     .sort((a, b) => b.planned[pos]! - (b.actual[pos] ?? 0) - (a.planned[pos]! - (a.actual[pos] ?? 0)))
     .slice(0, 4)
     .forEach((r) =>
       alerts.push(
-        `${r.name.startsWith(r.code) ? r.name : `${r.code} ${r.name}`}: ${pct(r.actual[pos])} ejecutado contra ${pct(r.planned[pos])} programado (desviación ${pct((r.actual[pos] ?? 0) - r.planned[pos]!)}).`,
+        `${r.name.startsWith(r.code) ? r.name : `${r.code} ${r.name}`}: ${pct(r.actual[pos])} ejecutado contra ${pct(r.planned[pos])} programado (desviación ${ptsTxt((r.actual[pos] ?? 0) - r.planned[pos]!)}).`,
       ),
     );
+  const deviationAlerts = alerts.length;
   const causes = lossPareto(
     data.losses.filter((l) => l.date >= week.start && l.date <= week.end),
     "lost_hours",
@@ -171,21 +176,21 @@ export function buildWeeklyReport(data: DashData, weekIndex: number, today: stri
     .forEach((f) =>
       alerts.push(
         `Hallazgo (${FINDING_TYPE_LABEL[f.type] ?? f.type}, severidad ${SEVERITY_LABEL[f.severity]?.toLowerCase()}): ${f.description}${
-          f.dueDate && f.dueDate < cutoff && f.status !== "closed" ? ` · vencido desde ${f.dueDate}` : f.dueDate && f.status !== "closed" ? ` · vence el ${f.dueDate}` : ""
+          f.dueDate && f.dueDate < cutoff && f.status !== "closed" ? ` · vencido desde el ${fecha(f.dueDate)}` : f.dueDate && f.status !== "closed" ? ` · vence el ${fecha(f.dueDate)}` : ""
         }.`,
       ),
     );
 
   for (const c of extras.constraints.filter((x) => x.status === "abierta"))
     alerts.push(
-      `Restricción abierta: ${c.description}${c.responsible ? ` (responsable: ${c.responsible})` : ""}${c.need_by ? `, necesaria para el ${c.need_by}${c.need_by < cutoff ? " · vencida" : ""}` : ""}.`,
+      `Restricción abierta: ${c.description}${c.responsible ? ` (responsable: ${c.responsible})` : ""}${c.need_by ? `, necesaria para el ${fecha(c.need_by)}${c.need_by < cutoff ? " · vencida" : ""}` : ""}.`,
     );
 
   const order = (names: string[], catalog: string[]) => [...catalog.filter((n) => names.includes(n)), ...names.filter((n) => !catalog.includes(n)).sort()];
   const roles = order([...new Set(logs.flatMap((l) => Object.keys(l?.personnel ?? {})))], data.project.personnelRoles);
   const equipment = order([...new Set(logs.flatMap((l) => Object.keys(l?.equipment ?? {})))], data.project.equipmentTypes);
 
-  return { data, progress, week, weekPos, days, dailyQty, dayInfo, alerts, photos, logs, roles, equipment, tests: extras.tests, constraints: extras.constraints };
+  return { data, progress, week, weekPos, days, dailyQty, dayInfo, alerts, risks: alerts.slice(deviationAlerts), photos, logs, roles, equipment, tests: extras.tests, constraints: extras.constraints };
 }
 
 export const pct = (x: number | null | undefined) => (x == null || !Number.isFinite(x) ? "—" : `${(x * 100).toLocaleString("es-CO", { maximumFractionDigits: 1 })} %`);

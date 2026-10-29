@@ -11,6 +11,8 @@ export interface RainEvent {
 export interface DailyLogDraft {
   personnel: Record<string, number>;
   equipment: Record<string, number>;
+  /** Actividad en la que trabajó cada equipo (nombre → id), para el rendimiento real por máquina. */
+  equipmentActivity?: Record<string, string>;
   rain: RainEvent[];
   observations: string;
   /** Lo que dictó el supervisor (se guarda aunque no haya señal). */
@@ -74,7 +76,11 @@ export function toDailyLogRow(d: DailyLogDraft, ctx: { id: string; projectId: st
     front_id: ctx.frontId,
     log_date: ctx.date,
     personnel: JSON.stringify(Object.entries(d.personnel).filter(([, q]) => q > 0).map(([role, qty]) => ({ role, qty }))),
-    equipment: JSON.stringify(Object.entries(d.equipment).filter(([, q]) => q > 0).map(([name, qty]) => ({ name, qty }))),
+    equipment: JSON.stringify(
+      Object.entries(d.equipment)
+        .filter(([, q]) => q > 0)
+        .map(([name, qty]) => (d.equipmentActivity?.[name] ? { name, qty, activity_id: d.equipmentActivity[name] } : { name, qty })),
+    ),
     rain: JSON.stringify(d.rain.map((r) => ({ start: normalizeTime(r.start)!, end: normalizeTime(r.end)! }))),
     observations: d.observations.trim(),
     client_created_at: ctx.now,

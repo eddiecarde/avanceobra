@@ -6,6 +6,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
 import { Alert } from "react-native";
 import { CATEGORY_LABEL, SEVERITY_LABEL, TYPE_LABEL, type FindingCategory } from "../../core/findings";
+import { useAiAccess } from "../../state/useAiAccess";
 import { callAi } from "../../services/ai";
 import { createFinding } from "../../services/findings";
 import { todayLocal } from "../../services/ids";
@@ -23,6 +24,7 @@ const SEVERITIES = (["low", "medium", "high", "critical"] as Severity[]).map((v)
 const DUE_DAYS: Record<Severity, number> = { critical: 1, high: 3, medium: 7, low: 15 };
 
 export default function NuevoHallazgo() {
+  const aiAllowed = useAiAccess();
   const { projectId, userId, userName } = useSession();
   // Desde Calidad se abre con ?categoria=no_conformidad o punch; desde el parte dictado, con la descripción
   const params = useLocalSearchParams<{ categoria?: FindingCategory; descripcion?: string; tipo?: FindingType; severidad?: Severity }>();
@@ -124,7 +126,7 @@ export default function NuevoHallazgo() {
       <Input value={description} onChangeText={setDescription} multiline style={{ minHeight: 110, textAlignVertical: "top" }} />
       <BigButton title={`📷 Foto (${cam.photos.length}/5)`} loading={cam.busy} onPress={() => void cam.capture()} />
       <PhotoStrip photos={cam.photos} onRemove={cam.remove} />
-      {cam.photos.length ? <BigButton title="✨ Analizar la foto con IA" loading={aiBusy} onPress={() => void analyze()} /> : null}
+      {cam.photos.length && aiAllowed ? <BigButton title="✨ Analizar la foto con IA" loading={aiBusy} onPress={() => void analyze()} /> : null}
       {ai ? (
         <Card>
           <Label>{ai.is_defect ? `IA: ${ai.title}` : "IA: no ve un defecto en la foto"}</Label>

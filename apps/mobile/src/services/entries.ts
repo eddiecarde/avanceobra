@@ -22,6 +22,8 @@ export interface EntryDraft {
   effectiveHours: number;
   lostHours: number;
   lossCause: LossCause;
+  /** Detalle por causa; lostHours es su suma y lossCause la causa con más horas. */
+  losses: { cause: string; hours: number }[];
   weather: Weather | null;
   crewSize: number;
   notes: string;
@@ -61,12 +63,12 @@ export async function saveEntry(d: EntryDraft): Promise<string> {
   await db.writeTransaction(async (tx) => {
     await tx.execute(
       `INSERT INTO progress_entries (id, project_id, front_id, activity_id, template_version_id, work_date, quantity,
-         effective_hours, lost_hours, loss_cause, weather, crew_size, notes, lat, lon, gps_accuracy_m, "values",
+         effective_hours, lost_hours, loss_cause, losses, weather, crew_size, notes, lat, lon, gps_accuracy_m, "values",
          status, signature_path, created_by, device_id, client_created_at, version)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'submitted', ?, ?, ?, ?, 1)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'submitted', ?, ?, ?, ?, 1)`,
       [
         entryId, d.projectId, d.frontId, d.activityId, d.templateVersionId ?? null, d.workDate, d.quantity,
-        d.effectiveHours, d.lostHours, d.lossCause, d.weather, d.crewSize, d.notes,
+        d.effectiveHours, d.lostHours, d.lossCause, JSON.stringify(d.losses), d.weather, d.crewSize, d.notes,
         d.fix?.lat ?? null, d.fix?.lon ?? null, d.fix?.accuracy ?? null, JSON.stringify(values),
         signaturePath, d.userId, deviceId, nowIso(),
       ],

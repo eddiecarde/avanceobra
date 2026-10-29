@@ -1,6 +1,6 @@
 "use client";
 
-import { summarizeDailyLogs, weatherClaim, type DailyLogSummary, type RainInterval, type WeatherClaim } from "@avanceobra/engine";
+import { entryLossLines, summarizeDailyLogs, weatherClaim, type DailyLogSummary, type LossLine, type RainInterval, type WeatherClaim } from "@avanceobra/engine";
 import { fetchAll } from "./dashboard";
 import { supabase } from "./supabase";
 
@@ -29,8 +29,9 @@ export async function loadParte(projectId: string, effectiveHours: number, range
       if (range.to) q = q.lte("log_date", range.to);
       return q.order("log_date").order("id").range(a, b);
     }),
-    fetchAll<{ work_date: string; lost_hours: number }>((a, b) => {
-      let q = supabase.from("progress_entries").select("work_date, lost_hours").eq("project_id", projectId).eq("loss_cause", "weather").neq("status", "rejected");
+    fetchAll<{ work_date: string; lost_hours: number; loss_cause: string; losses: LossLine[] | null }>((a, b) => {
+      // Registros con pérdidas: el clima puede ser una de varias causas del registro
+      let q = supabase.from("progress_entries").select("work_date, lost_hours, loss_cause, losses").eq("project_id", projectId).gt("lost_hours", 0).neq("status", "rejected");
       if (range.from) q = q.gte("work_date", range.from);
       if (range.to) q = q.lte("work_date", range.to);
       return q.order("work_date").order("id").range(a, b);
@@ -44,7 +45,12 @@ export async function loadParte(projectId: string, effectiveHours: number, range
   );
   // Las cuadrillas paran a la vez por la misma lluvia: del día se toma el registro con más horas
   const entryHours = new Map<string, number>();
-  for (const e of entries.data) entryHours.set(e.work_date, Math.max(entryHours.get(e.work_date) ?? 0, Number(e.lost_hours)));
+  for (const e of entries.data) {
+    const rain = entryLossLines({ lostHours: Number(e.lost_hours), lossCause: e.loss_cause, losses: e.losses })
+      .filter((l) => l.cause === "weather")
+      .reduce((s, l) => s + l.hours, 0);
+    if (rain > 0) entryHours.set(e.work_date, Math.max(entryHours.get(e.work_date) ?? 0, rain));
+  }
   return {
     days: [...summaries.values()].sort((a, b) => a.date.localeCompare(b.date)),
     claim: weatherClaim(summaries.values(), entryHours, { window, effectiveHours }),

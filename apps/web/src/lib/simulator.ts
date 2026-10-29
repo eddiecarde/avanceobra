@@ -1,6 +1,6 @@
 "use client";
 
-import { availableDays, historicalRate, type ProjectSim, type SimActivity } from "@avanceobra/engine";
+import { availableDays, entryLossLines, equipmentUnitsByActivity, historicalRate, type LossLine, type ProjectSim, type SimActivity } from "@avanceobra/engine";
 import { effectiveDaily, type Resource, type WorkdayAssumptions } from "./library";
 import { loadWeatherClaim } from "./parte";
 import { supabase } from "./supabase";
@@ -17,6 +17,8 @@ export interface SimRow {
   perUnitDaily: number;
   rateSource: "real" | "reference" | "manual";
   realSamples: number;
+  /** Días del rendimiento real en que el parte diario dijo cuántas máquinas trabajaron en la actividad. */
+  realMachineDays: number;
   realReliable: boolean;
   referencePerUnit: number | null;
   realPerUnit: number | null;
@@ -60,7 +62,7 @@ const todayISO = () => new Date().toISOString().slice(0, 10);
 /** Lee proyecto, contrato, actividades, avance y biblioteca y arma los supuestos iniciales. */
 export async function loadSimInputs(projectId: string, workday: WorkdayAssumptions): Promise<SimInputs> {
   const since = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10);
-  const [p, c, cs, acts, done, daily, ar, losses, weather] = await Promise.all([
+  const [p, c, cs, acts, done, daily, ar, losses, weather, logs] = await Promise.all([
     supabase.from("projects").select("name, currency, contract_end_date, org_id").eq("id", projectId).single(),
     supabase.from("contracts").select("*").eq("project_id", projectId).maybeSingle(),
     supabase.from("cost_settings").select("*").eq("project_id", projectId).maybeSingle(),
@@ -68,9 +70,14 @@ export async function loadSimInputs(projectId: string, workday: WorkdayAssumptio
     supabase.from("activity_progress").select("activity_id, executed_qty").eq("project_id", projectId),
     supabase.from("activity_daily_output").select("activity_id, work_date, quantity").eq("project_id", projectId).gte("work_date", since),
     supabase.from("activity_resources").select("activity_id, units, use_real_rate, resource:resource_catalog(*)").eq("project_id", projectId),
-    supabase.from("progress_entries").select("loss_cause, lost_hours").eq("project_id", projectId).neq("loss_cause", "none").neq("loss_cause", "weather"),
+    supabase.from("progress_entries").select("loss_cause, lost_hours, losses").eq("project_id", projectId).neq("loss_cause", "none"),
     loadWeatherClaim(projectId, workday.effectiveHours),
+    // Máquinas que el parte diario asignó a cada actividad (para el rendimiento real por máquina)
+    supabase.from("daily_log_latest").select("log_date, equipment").eq("project_id", projectId).gte("log_date", since),
   ]);
+  const machines = equipmentUnitsByActivity(
+    ((logs.data ?? []) as { log_date: string; equipment: { name: string; qty: number; activity_id?: string | null }[] | null }[]).map((l) => ({ date: l.log_date, equipment: l.equipment ?? [] })),
+  );
 
   const contract = c.data;
   const contractValue = Number(contract?.contract_value ?? 0);
@@ -80,7 +87,11 @@ export async function loadSimInputs(projectId: string, workday: WorkdayAssumptio
   const claimCauses: string[] = contract?.claimable_causes ?? ["weather", "permits", "design_client"];
   // Clima: por día (lluvia del parte dentro de la jornada o lo registrado), sin sumar cuadrillas.
   // Otras causas reclamables (permisos, cambios del cliente): horas perdidas registradas.
-  const otherHours = (losses.data ?? []).filter((l) => claimCauses.includes(l.loss_cause as string)).reduce((s, l) => s + Number(l.lost_hours), 0);
+  // Cada línea de pérdida por su causa (el clima se cuenta aparte, por día, con el parte diario)
+  const otherHours = ((losses.data ?? []) as { loss_cause: string; lost_hours: number; losses: LossLine[] | null }[])
+    .flatMap((l) => entryLossLines({ lostHours: Number(l.lost_hours), lossCause: l.loss_cause, losses: l.losses }))
+    .filter((l) => l.cause !== "weather" && claimCauses.includes(l.cause))
+    .reduce((s, l) => s + l.hours, 0);
   const weatherHours = claimCauses.includes("weather") ? weather.hours : 0;
   const claimHours = otherHours + weatherHours;
   const claimable = Math.floor(claimHours / workday.effectiveHours + 1e-9);
@@ -97,7 +108,17 @@ export async function loadSimInputs(projectId: string, workday: WorkdayAssumptio
     // Recurso principal: el que más produce (si hay varios asignados)
     const primary = [...assigned].sort((x, y) => effectiveDaily(y.resource, workday) * y.units - effectiveDaily(x.resource, workday) * x.units)[0];
     const units = assigned.reduce((s, x) => s + Number(x.units), 0) || 1;
-    const series = (daily.data ?? []).filter((d) => d.activity_id === a.id).map((d) => ({ date: d.work_date as string, quantity: Number(d.quantity), units }));
+    // Por día, las máquinas que reportó el parte para esta actividad; si el parte no lo dice, las asignadas
+    const reported = machines.get(a.id);
+    const series = (daily.data ?? [])
+      .filter((d) => d.activity_id === a.id)
+      .map((d) => ({ date: d.work_date as string, quantity: Number(d.quantity), units: reported?.get(d.work_date as string) ?? units }));
+    // Los mismos 14 días que usa el rendimiento real
+    const reportedDays = [...series]
+      .filter((d) => d.units > 0)
+      .sort((x, y) => x.date.localeCompare(y.date))
+      .slice(-14)
+      .filter((d) => reported?.has(d.date)).length;
     const real = historicalRate(series, 14);
     const realPerUnit = real.samples > 0 ? real.meanPerUnit : null;
     const referencePerUnit = primary ? effectiveDaily(primary.resource, workday) : null;
@@ -115,6 +136,7 @@ export async function loadSimInputs(projectId: string, workday: WorkdayAssumptio
       perUnitDaily: perUnit,
       rateSource: perUnit === realPerUnit && realPerUnit !== null ? "real" : perUnit === referencePerUnit && referencePerUnit !== null ? "reference" : "manual",
       realSamples: real.samples,
+      realMachineDays: reportedDays,
       realReliable: real.reliable,
       referencePerUnit,
       realPerUnit,

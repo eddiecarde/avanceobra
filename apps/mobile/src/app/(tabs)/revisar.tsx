@@ -10,6 +10,19 @@ import { PhotoStrip } from "../../ui/PhotoStrip";
  * Aprobación del residente. Un registro aprobado ya no se puede editar ni borrar
  * (lo garantiza el servidor); las correcciones se hacen con un registro de ajuste.
  */
+const CAUSE_LABEL: Record<string, string> = { weather: "Clima", material: "Material", equipment: "Equipo", permits: "Permisos", labor: "Personal", design_client: "Diseño/Cliente", other: "Otra" };
+/** "2 h Clima · 1 h Material" (o la única causa de registros anteriores). */
+function lossText(e: { lost_hours: number; loss_cause: string; losses: string | null }) {
+  let lines: { cause: string; hours: number }[] = [];
+  try {
+    lines = e.losses ? (JSON.parse(e.losses) as { cause: string; hours: number }[]) : [];
+  } catch {
+    lines = [];
+  }
+  if (!lines.length) lines = [{ cause: e.loss_cause, hours: e.lost_hours }];
+  return lines.map((l) => `${Number(l.hours).toLocaleString("es-CO")} h ${CAUSE_LABEL[l.cause] ?? l.cause}`).join(" · ");
+}
+
 export default function Revisar() {
   const { projectId, userId, role } = useSession();
   const [rejecting, setRejecting] = useState<string | null>(null);
@@ -17,10 +30,10 @@ export default function Revisar() {
 
   const { data: entries } = useQuery<{
     id: string; work_date: string; quantity: number; unit: string; activity: string; front: string; author: string | null;
-    notes: string; lost_hours: number; loss_cause: string; elements: number; area: number | null;
+    notes: string; lost_hours: number; loss_cause: string; losses: string | null; elements: number; area: number | null;
   }>(
     `SELECT e.id, e.work_date, e.quantity, a.unit, a.name AS activity, f.code AS front, m.member_name AS author,
-            e.notes, e.lost_hours, e.loss_cause,
+            e.notes, e.lost_hours, e.loss_cause, e.losses,
             (SELECT COUNT(*) FROM entry_elements ee WHERE ee.entry_id = e.id) AS elements,
             (SELECT SUM(area_m2) FROM progress_areas pa WHERE pa.entry_id = e.id) AS area
      FROM progress_entries e JOIN activities a ON a.id = e.activity_id JOIN fronts f ON f.id = e.front_id
@@ -45,7 +58,7 @@ export default function Revisar() {
           {e.elements || e.area ? (
             <Body muted>{`${e.elements} elemento(s) marcados${e.area ? ` · área ≈ ${Math.round(e.area)} m²` : ""}`}</Body>
           ) : null}
-          {e.lost_hours > 0 ? <Body muted>{`Horas perdidas: ${e.lost_hours} (${e.loss_cause})`}</Body> : null}
+          {e.lost_hours > 0 ? <Body muted>{`Horas perdidas: ${lossText(e)}`}</Body> : null}
           {e.notes ? <Body muted>{e.notes}</Body> : null}
           <PhotoStrip
             photos={photos.filter((p) => p.entry_id === e.id).map((p) => ({ id: p.id, storagePath: p.storage_path }))}

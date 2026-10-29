@@ -106,3 +106,18 @@ test("gerencia: resumen ejecutivo con IA escrito solo con las cifras del tablero
   expect(facts).toMatchObject({ obra: "Parque Solar Prueba", hallazgos_criticos_abiertos: 1 });
   expect(String(facts.avance_real)).toMatch(/%$/);
 });
+
+test("IA solo para quien la tiene activada: sin permiso no aparece; el administrador la activa en Equipo", async ({ page }) => {
+  const db = buildDb();
+  db.tables.memberships![0]!.ai_enabled = false;
+  const writes = await mockSupabase(page, db);
+  await page.goto("/asistente");
+  await expect(page.getByText("No tienes activado el asistente con IA en esta obra")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Asistente IA" })).toHaveCount(0);
+  await page.goto("/gerencia");
+  await expect(page.getByRole("button", { name: /Resumen con IA/ })).toHaveCount(0);
+
+  await page.goto("/equipo");
+  await page.getByLabel("Asistente con IA para Marta").click();
+  await expect.poll(() => writes.find((w) => w.table === "memberships" && w.method === "PATCH")?.body).toEqual({ ai_enabled: true });
+});

@@ -28,6 +28,7 @@ interface Entry {
   effective_hours: number;
   lost_hours: number;
   loss_cause: string;
+  losses: { cause: string; hours: number }[] | null;
   crew_size: number;
   notes: string;
   status: Status;
@@ -84,7 +85,7 @@ function Changes({ c }: { c: Pick<Correction, "previous" | "proposed"> }) {
  * solo se corrige con una solicitud (motivo, versión anterior y nueva) que decide otra persona.
  */
 export default function Registros() {
-  const { memberships, session } = useSession();
+  const { memberships, session, canUseAi } = useSession();
   const projects = useMemo(() => [...new Map(memberships.filter((m) => m.project).map((m) => [m.project_id, m.project!])).values()], [memberships]);
   const [picked, setPicked] = useState("");
   const projectId = picked || projects[0]?.id || "";
@@ -116,7 +117,7 @@ export default function Registros() {
     let off = false;
     let q = supabase
       .from("progress_entries")
-      .select("id, activity_id, work_date, quantity, effective_hours, lost_hours, loss_cause, crew_size, notes, status, created_by, version, rejection_reason")
+      .select("id, activity_id, work_date, quantity, effective_hours, lost_hours, loss_cause, losses, crew_size, notes, status, created_by, version, rejection_reason")
       .eq("project_id", projectId)
       .gte("work_date", from)
       .lte("work_date", to)
@@ -351,7 +352,11 @@ export default function Registros() {
                       </td>
                       <td className="py-2 pr-3 text-right tabular-nums">
                         {n1(e.effective_hours)}
-                        {e.lost_hours > 0 ? <div className="text-sm text-zinc-500">−{n1(e.lost_hours)} {LOSS_LABEL[e.loss_cause] ?? ""}</div> : null}
+                        {e.lost_hours > 0 ? (
+                          <div className="text-sm text-zinc-500">
+                            {(e.losses?.length ? e.losses : [{ cause: e.loss_cause, hours: e.lost_hours }]).map((l) => `−${n1(Number(l.hours))} ${LOSS_LABEL[l.cause] ?? ""}`).join(" · ")}
+                          </div>
+                        ) : null}
                       </td>
                       <td className="py-2 pr-3">
                         <Badge tone={STATUS_TONE[e.status]}>{STATUS_LABEL[e.status]}</Badge>
@@ -383,7 +388,7 @@ export default function Registros() {
                               </Button>
                             </>
                           ) : null}
-                          {canDecide ? (
+                          {canDecide && canUseAi(projectId) ? (
                             <Button size="sm" variant="ghost" disabled={checking !== null} onClick={() => void verify(e.id)}>
                               {checking === e.id ? "Verificando…" : checks[e.id] ? "Verificar de nuevo" : "Verificar con IA"}
                             </Button>

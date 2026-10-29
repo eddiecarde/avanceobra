@@ -94,10 +94,13 @@ function Logo({ dark }: { dark?: boolean }) {
 
 /** Marco de la web: barra lateral (computador) o menú superior (celular), usuario y control de sesión (redirige a /login). */
 export function AppShell({ children }: { children: ReactNode }) {
-  const { loading, session, isAdmin, memberships, signOut, isPlatformAdmin, suspended } = useSession();
+  const { loading, session, isAdmin, memberships, signOut, isPlatformAdmin, suspended, anyAi } = useSession();
   // El dueño de la plataforma ve además el panel de empresas
   const groups = GROUPS.map((g) =>
-    g.label === "Ajustes"
+    g.label === "Campo"
+      ? // El asistente con IA solo para quien lo tiene activado
+        { ...g, pages: g.pages.filter((p) => p.href !== "/asistente" || anyAi) }
+      : g.label === "Ajustes"
       ? {
           ...g,
           // Empresa: solo el administrador; Panel del dueño: solo el dueño de la plataforma

@@ -1,6 +1,6 @@
 "use client";
 
-import type { DailyQuantity, LossRecord, ScheduleActivity, SubfieldPlan, WorkCalendar } from "@avanceobra/engine";
+import { entryLossLines, type DailyQuantity, type LossLine, type LossRecord, type ScheduleActivity, type SubfieldPlan, type WorkCalendar } from "@avanceobra/engine";
 import { DEFAULT_WORKDAY, effectiveDaily, type Resource } from "./library";
 import { projectLogo } from "./logo";
 import { supabase } from "./supabase";
@@ -51,6 +51,8 @@ export interface DashEntry {
   effectiveHours: number;
   lostHours: number;
   lossCause: string;
+  /** Pérdidas por causa (un registro puede tener varias); siempre al menos la de lostHours/lossCause. */
+  losses: LossLine[];
   weather: string | null;
   crewSize: number;
   notes: string;
@@ -180,7 +182,7 @@ export async function loadDashboard(projectId: string): Promise<DashData> {
     fetchAll((a, b) =>
       supabase
         .from("progress_entries")
-        .select("id, activity_id, work_date, quantity, effective_hours, lost_hours, loss_cause, weather, crew_size, notes, status, created_by")
+        .select("id, activity_id, work_date, quantity, effective_hours, lost_hours, loss_cause, losses, weather, crew_size, notes, status, created_by")
         .eq("project_id", projectId)
         .in("status", ["submitted", "approved"])
         .order("work_date")
@@ -286,6 +288,7 @@ export interface RawDash {
     crew_size: number;
     status: string;
     notes?: string | null;
+    losses?: LossLine[] | null;
     created_by?: string | null;
   }[];
   resources: { activity_id: string; units: number; resource: Resource | null }[];
@@ -363,6 +366,7 @@ export function buildDashData(raw: RawDash, plan: DashData["plan"]): DashData {
     effectiveHours: Number(e.effective_hours),
     lostHours: Number(e.lost_hours),
     lossCause: e.loss_cause,
+    losses: entryLossLines({ lostHours: Number(e.lost_hours), lossCause: e.loss_cause, losses: e.losses }),
     weather: e.weather,
     crewSize: Number(e.crew_size),
     notes: e.notes ?? "",
@@ -413,9 +417,8 @@ export function buildDashData(raw: RawDash, plan: DashData["plan"]): DashData {
     companies: raw.companies ?? [],
     daily: ents.map((e) => ({ activityId: e.activityId, date: e.workDate, quantity: e.quantity })),
     entries: ents,
-    losses: ents
-      .filter((e) => e.lossCause !== "none" && e.lostHours > 0)
-      .map((e) => ({ cause: e.lossCause, lostHours: e.lostHours, activityId: e.activityId, date: e.workDate, ...perActivity.get(e.activityId) })),
+    // Una fila por causa: un registro con 2 h de clima y 1 h de material suma a las dos barras del Pareto
+    losses: ents.flatMap((e) => e.losses.map((l) => ({ cause: l.cause, lostHours: l.hours, activityId: e.activityId, date: e.workDate, ...perActivity.get(e.activityId) }))),
     findings: raw.findings.map((f) => ({
       id: f.id,
       frontId: f.front_id,

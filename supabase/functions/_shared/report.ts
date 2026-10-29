@@ -3,7 +3,7 @@
  * que la página /informe de la web, y arma el texto para Telegram. Sin Deno ni red: se prueba con Vitest.
  * El motor de cálculo llega empaquetado en engine.js (npm run build:functions).
  */
-import { activityStatus, addDays, diffDays, lossPareto, recentDailyRate, sCurve } from "./engine.js";
+import { buildDailyAnalysis, diffDays, type DailyAnalysis, type ReportInput } from "./engine.js";
 
 export interface RawDashboard {
   project: {
@@ -36,6 +36,8 @@ export interface RawDashboard {
     effective_hours: number;
     lost_hours: number;
     loss_cause: string;
+    /** Varias causas en un registro: [{ cause, hours }]; vacío = una con lost_hours y loss_cause. */
+    losses?: { cause: string; hours: number }[] | null;
     weather: string | null;
     crew_size: number;
     notes?: string | null;
@@ -92,8 +94,18 @@ export interface DailyReport {
   weekCauses: { cause: string; hours: number; pct: number }[];
   findingsOpened: number;
   findingsClosed: number;
-  openFindings: { severity: string; type: string; description: string; dueDate: string | null; overdue: boolean }[];
+  openFindings: {
+    severity: string;
+    type: string;
+    description: string;
+    dueDate: string | null;
+    overdue: boolean;
+  }[];
   notes: { code: string; text: string }[];
+  /** Análisis del informe (estados con criterio, prioridades, situaciones, observaciones). */
+  analysis: DailyAnalysis;
+  /** Parte diario del día (personal y equipos), si alguien lo envió; lo carga la Edge Function. */
+  dayLog?: { personnel: number; equipment: number } | null;
 }
 
 export const LOSS_LABEL: Record<string, string> = {
@@ -105,59 +117,141 @@ export const LOSS_LABEL: Record<string, string> = {
   design_client: "Diseño/Cliente",
   other: "Otra",
 };
-export const WEATHER_LABEL: Record<string, string> = { sunny: "Soleado", cloudy: "Nublado", light_rain: "Llovizna", heavy_rain: "Lluvia", storm: "Tormenta" };
-export const SEVERITY_LABEL: Record<string, string> = { low: "Baja", medium: "Media", high: "Alta", critical: "Crítica" };
-export const FINDING_TYPE_LABEL: Record<string, string> = { quality: "Calidad", safety: "SST", environment: "Ambiental", operation: "Operación" };
-export const LIGHT_LABEL: Record<Light, string> = { green: "Al día", amber: "En riesgo", red: "Atrasada", done: "Terminada", not_started: "Por iniciar", no_plan: "Sin programa" };
-const SEVERITY_RANK: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
+export const WEATHER_LABEL: Record<string, string> = {
+  sunny: "Soleado",
+  cloudy: "Nublado",
+  light_rain: "Llovizna",
+  heavy_rain: "Lluvia",
+  storm: "Tormenta",
+};
+export const SEVERITY_LABEL: Record<string, string> = {
+  low: "Baja",
+  medium: "Media",
+  high: "Alta",
+  critical: "Crítica",
+};
+export const FINDING_TYPE_LABEL: Record<string, string> = {
+  quality: "Calidad",
+  safety: "SST",
+  environment: "Ambiental",
+  operation: "Operación",
+};
+export const LIGHT_LABEL: Record<Light, string> = {
+  green: "Al día",
+  amber: "En riesgo",
+  red: "Atrasada",
+  done: "Terminada",
+  not_started: "Por iniciar",
+  no_plan: "Sin programa",
+};
+const SEVERITY_RANK: Record<string, number> = {
+  critical: 0,
+  high: 1,
+  medium: 2,
+  low: 3,
+};
 
 /** Fecha de Colombia (UTC−5, sin horario de verano) de un instante. */
 export const bogotaDate = (t: Date | string) => new Date(new Date(t).getTime() - 5 * 3_600_000).toISOString().slice(0, 10);
 
-export function buildDailyReport(raw: RawDashboard, day: string): DailyReport {
-  const cal = { workdays: raw.project.workdays ?? undefined, holidays: raw.project.holidays ?? [], colombianHolidays: raw.project.colombian_holidays !== false };
-  const acts = raw.activities.map((a) => ({
-    id: a.id,
-    code: a.code,
-    name: a.name,
-    unit: a.unit,
-    contractQty: Number(a.contract_qty),
-    plannedStart: a.planned_start,
-    plannedFinish: a.planned_finish,
-    weight: a.weight == null ? undefined : Number(a.weight),
-  }));
-  const upTo = raw.entries.filter((e) => e.work_date <= day).map((e) => ({ activityId: e.activity_id, date: e.work_date, quantity: Number(e.quantity) }));
-  const starts = acts.map((a) => a.plannedStart).filter(Boolean) as string[];
-  const from = raw.project.start_date ?? starts.sort()[0] ?? day;
-  const to = raw.project.contract_end_date ?? day;
-  const curve = sCurve({ activities: acts, daily: upTo, from, to: to < day ? day : to, today: day, calendar: cal });
+/** Datos de dashboard_json → entrada del análisis de informes (fechas de hallazgos en hora de Colombia). */
+export function reportInputFromRaw(raw: RawDashboard): ReportInput {
+  return {
+    project: {
+      id: raw.project.id,
+      name: raw.project.name,
+      startDate: raw.project.start_date,
+      contractEnd: raw.project.contract_end_date,
+    },
+    calendar: {
+      workdays: raw.project.workdays ?? undefined,
+      holidays: raw.project.holidays ?? [],
+      colombianHolidays: raw.project.colombian_holidays !== false,
+    },
+    activities: raw.activities.map((a) => ({
+      id: a.id,
+      code: a.code,
+      name: a.name,
+      unit: a.unit,
+      contractQty: Number(a.contract_qty),
+      plannedStart: a.planned_start,
+      plannedFinish: a.planned_finish,
+      weight: a.weight == null ? undefined : Number(a.weight),
+      front: a.front?.code ?? null,
+      frontName: a.front?.name ?? null,
+      group: a.work_group ?? null,
+      responsible: null,
+    })),
+    entries: raw.entries.map((e) => ({
+      activityId: e.activity_id,
+      date: e.work_date,
+      quantity: Number(e.quantity),
+      crew: Number(e.crew_size),
+      effectiveHours: Number(e.effective_hours),
+      lostHours: Number(e.lost_hours),
+      lossCause: e.loss_cause,
+      losses: e.losses ?? undefined,
+      weather: e.weather,
+      notes: e.notes ?? "",
+    })),
+    findings: raw.findings.map((f) => ({
+      id: f.id,
+      type: f.type,
+      severity: f.severity,
+      status: f.status,
+      description: f.description,
+      createdAt: bogotaDate(f.created_at),
+      closedAt: f.closed_at ? bogotaDate(f.closed_at) : null,
+      dueDate: f.due_date,
+      impeditive: !!f.impeditive,
+    })),
+  };
+}
 
+export function buildDailyReport(raw: RawDashboard, day: string): DailyReport {
+  // Un solo cálculo (el del análisis) para que el mensaje, el PDF y la web digan lo mismo
+  const analysis = buildDailyAnalysis(reportInputFromRaw(raw), day, {
+    loss: LOSS_LABEL,
+  });
+  const curve = analysis.curve;
   const todays = raw.entries.filter((e) => e.work_date === day);
-  const code = (id: string) => acts.find((a) => a.id === id)?.code ?? "?";
-  const rows: ReportRow[] = acts
-    .map((a) => {
-      const dayQty = todays.filter((e) => e.activity_id === a.id).reduce((s, e) => s + Number(e.quantity), 0);
-      const executed = upTo.filter((d) => d.activityId === a.id).reduce((s, d) => s + d.quantity, 0);
-      const st = activityStatus(a, executed, recentDailyRate(upTo, a.id, day, 14, cal), day, cal);
-      return { code: a.code, group: raw.activities.find((x) => x.id === a.id)?.work_group ?? null, name: a.name, unit: a.unit, dayQty, actualPct: st.actualPct, plannedPct: st.plannedPct, dailyRate: st.dailyRate, requiredRate: st.requiredRate, light: st.light as Light, reason: st.reason };
-    })
+  const codeOf = new Map(raw.activities.map((a) => [a.id, a.code]));
+  const code = (id: string) => codeOf.get(id) ?? "?";
+  const rows: ReportRow[] = analysis.snapshot.rows
+    .map((r) => ({
+      code: r.code,
+      group: r.group,
+      name: r.name,
+      unit: r.unit,
+      dayQty: r.periodQty,
+      actualPct: r.actualPct,
+      plannedPct: r.plannedPct,
+      dailyRate: r.dailyRate,
+      requiredRate: r.requiredRate,
+      light: r.light as Light,
+      reason: r.reason,
+    }))
     .filter((r) => r.dayQty > 0 || (r.light !== "done" && r.light !== "not_started"));
 
   const weather = new Map<string, number>();
   todays.forEach((e) => e.weather && weather.set(e.weather, (weather.get(e.weather) ?? 0) + 1));
-  const lossesToday = new Map<string, number>();
-  todays.filter((e) => e.loss_cause !== "none" && Number(e.lost_hours) > 0).forEach((e) => lossesToday.set(e.loss_cause, (lossesToday.get(e.loss_cause) ?? 0) + Number(e.lost_hours)));
-  const week = lossPareto(
-    raw.entries
-      .filter((e) => e.work_date >= addDays(day, -6) && e.work_date <= day && e.loss_cause !== "none")
-      .map((e) => ({ cause: e.loss_cause, lostHours: Number(e.lost_hours) })),
-    "lost_hours",
-  ).slice(0, 3);
+  // Pérdidas por causa (un registro puede tener varias): las del análisis
+  const lossesToday = new Map(analysis.lossesToday.map((l) => [l.cause, l.hours]));
 
-  const finds = raw.findings.map((f) => ({ ...f, created: bogotaDate(f.created_at), closed: f.closed_at ? bogotaDate(f.closed_at) : null }));
+  const finds = raw.findings.map((f) => ({
+    ...f,
+    created: bogotaDate(f.created_at),
+    closed: f.closed_at ? bogotaDate(f.closed_at) : null,
+  }));
   const open = finds
     .filter((f) => f.created <= day && (!f.closed || f.closed > day) && f.status !== "closed")
-    .map((f) => ({ severity: f.severity, type: f.type, description: f.description, dueDate: f.due_date, overdue: f.due_date != null && f.due_date < day }))
+    .map((f) => ({
+      severity: f.severity,
+      type: f.type,
+      description: f.description,
+      dueDate: f.due_date,
+      overdue: f.due_date != null && f.due_date < day,
+    }))
     .sort((a, b) => SEVERITY_RANK[a.severity]! - SEVERITY_RANK[b.severity]! || Number(b.overdue) - Number(a.overdue));
 
   return {
@@ -178,11 +272,12 @@ export function buildDailyReport(raw: RawDashboard, day: string): DailyReport {
     weather: [...weather.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null,
     rows: rows.sort((a, b) => a.code.localeCompare(b.code)),
     lossesToday: [...lossesToday.entries()].map(([cause, hours]) => ({ cause, hours })).sort((a, b) => b.hours - a.hours),
-    weekCauses: week.map((r) => ({ cause: r.key, hours: r.value, pct: r.pct })),
+    weekCauses: analysis.weekCauses,
     findingsOpened: finds.filter((f) => f.created === day).length,
     findingsClosed: finds.filter((f) => f.closed === day).length,
     openFindings: open,
     notes: todays.filter((e) => e.notes?.trim()).map((e) => ({ code: code(e.activity_id), text: e.notes!.trim() })),
+    analysis,
   };
 }
 
@@ -191,8 +286,14 @@ export const n1 = (n: number) => n.toLocaleString("es-CO", { maximumFractionDigi
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 /** Mensaje corto para Telegram (HTML). El detalle va en el PDF adjunto. */
+/** Atrasadas con el criterio documentado del informe (las mismas que lista el PDF). */
+const lateRows = (r: DailyReport) => {
+  const late = new Set(r.analysis.snapshot.rows.filter((x) => x.status === "atrasada").map((x) => x.code));
+  return r.rows.filter((x) => late.has(x.code));
+};
+
 export function reportTelegramHtml(r: DailyReport, webUrl: string): string {
-  const late = r.rows.filter((x) => x.light === "red");
+  const late = lateRows(r);
   const produced = r.rows.filter((x) => x.dayQty > 0);
   const lines = [
     `📋 <b>Informe diario · ${esc(r.projectName)}</b>`,
@@ -227,7 +328,7 @@ export interface Blockers {
  */
 export function nightSummaryHtml(r: DailyReport, b: Blockers, webUrl: string): string {
   const produced = r.rows.filter((x) => x.dayQty > 0);
-  const late = r.rows.filter((x) => x.light === "red");
+  const late = lateRows(r);
   const byGroup = (rows: ReportRow[]) => {
     const m = new Map<string, ReportRow[]>();
     for (const x of rows) m.set(x.group ?? x.code, [...(m.get(x.group ?? x.code) ?? []), x]);
@@ -250,7 +351,11 @@ export function nightSummaryHtml(r: DailyReport, b: Blockers, webUrl: string): s
   lines.push(
     "",
     `⚠️ <b>Atrasado</b>: avance ${pct(r.actualPct)} de ${pct(r.plannedPct)} programado` +
-      (r.finishDelay != null && r.finishDelay > 0 ? ` · fin proyectado ${r.projectedFinish} (+${r.finishDelay} días)` : r.projectedFinish ? ` · fin proyectado ${r.projectedFinish}` : ""),
+      (r.finishDelay != null && r.finishDelay > 0
+        ? ` · fin proyectado ${r.projectedFinish} (+${r.finishDelay} días)`
+        : r.projectedFinish
+          ? ` · fin proyectado ${r.projectedFinish}`
+          : ""),
   );
   if (late.length) {
     const top = grouped

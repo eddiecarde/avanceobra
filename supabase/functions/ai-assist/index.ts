@@ -61,7 +61,16 @@ Deno.serve(async (req) => {
 
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
   const action = String(body?.action ?? "");
-  const projectId = typeof body?.project_id === "string" && UUID.test(body.project_id) ? body.project_id : null;
+  let projectId = typeof body?.project_id === "string" && UUID.test(body.project_id) ? body.project_id : null;
+  // La obra de la verificación sale del registro (si no vino)
+  if (!projectId && action === "verify_entry" && typeof body?.entry_id === "string" && UUID.test(body.entry_id)) {
+    const { data: e } = await db.from("progress_entries").select("project_id").eq("id", body.entry_id).maybeSingle();
+    projectId = (e?.project_id as string | undefined) ?? null;
+  }
+  // Solo quien autorizó el administrador de la obra (o el dueño de la plataforma)
+  if (!projectId) return reply(400, { error: "Falta la obra." });
+  const { data: allowed } = await db.rpc("can_use_ai", { p_project: projectId });
+  if (allowed !== true) return reply(403, { error: "No tienes activado el asistente con IA en esta obra. Pídele al administrador que te lo active en Equipo." });
 
   const since = new Date(Date.now() - 86_400_000).toISOString();
   const { count } = await admin.from("ai_usage").select("id", { count: "exact", head: true }).eq("user_id", userId).gte("created_at", since);

@@ -33,6 +33,8 @@ interface Member {
   last_sign_in_at: string | null;
   must_change_password: boolean;
   company_id: string | null;
+  /** El administrador le activó el asistente con IA. */
+  ai_enabled: boolean;
 }
 
 /** Contraseña temporal legible (sin 0/O ni 1/l para dictarla o copiarla sin errores). */
@@ -254,6 +256,7 @@ export default function Equipo() {
                 <th className="pr-2">Empresa</th>
                 <th className="pr-2">Rol</th>
                 <th className="pr-2">Telegram</th>
+                <th className="pr-2">Asistente IA</th>
                 <th className="pr-2">Último ingreso</th>
                 <th />
               </tr>
@@ -261,7 +264,7 @@ export default function Equipo() {
             {groups.map((g) => (
               <tbody key={g.key}>
                 <tr className="bg-zinc-50 dark:bg-zinc-900">
-                  <th colSpan={6} scope="colgroup" className="px-2 py-1.5 text-sm font-bold">
+                  <th colSpan={7} scope="colgroup" className="px-2 py-1.5 text-sm font-bold">
                     {g.company ? (
                       <>
                         <Badge tone={g.company.kind === "contratista" ? "blue" : "neutral"}>{KIND_LABEL[g.company.kind]}</Badge> <span className="ml-1">{g.company.name}</span>
@@ -332,6 +335,20 @@ export default function Equipo() {
                         </Select>
                       </td>
                       <td className="pr-2">{m.telegram_linked ? <Badge tone="green">✓ Vinculado</Badge> : <Badge tone="amber">Sin vincular</Badge>}</td>
+                      <td className="pr-2">
+                        <label className="inline-flex cursor-pointer items-center gap-1.5 text-sm">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4"
+                            checked={m.ai_enabled}
+                            onChange={(e) =>
+                              void patchMember(m, { ai_enabled: e.target.checked }, `${m.name} ${e.target.checked ? "ya puede usar" : "ya no puede usar"} el asistente con IA.`)
+                            }
+                            aria-label={`Asistente con IA para ${m.name}`}
+                          />
+                          {m.ai_enabled ? "Activo" : "No"}
+                        </label>
+                      </td>
                       <td className="pr-2 text-sm tabular-nums">
                         {m.must_change_password ? (
                           <Badge tone="amber">Contraseña temporal</Badge>
@@ -358,7 +375,7 @@ export default function Equipo() {
                 })}
                 {g.members.length === 0 ? (
                   <tr className="border-b border-zinc-100 dark:border-zinc-800">
-                    <td colSpan={6} className="py-2 text-sm text-zinc-500">
+                    <td colSpan={7} className="py-2 text-sm text-zinc-500">
                       Nadie asignado todavía: elige la empresa en la columna Empresa de cada persona.
                     </td>
                   </tr>

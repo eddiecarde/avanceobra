@@ -33,7 +33,7 @@ const STRIP: Record<string, string[]> = {
 const READ_ONLY = new Set(["projects", "memberships", "profiles", "elements", "site_plans", "form_templates", "form_template_versions", "project_companies", "checklists", "weekly_plans", "weekly_plan_items", "materials"]);
 
 /** Columnas JSON guardadas como texto en SQLite. */
-const JSON_COLUMNS: Record<string, string[]> = { progress_entries: ["values"], daily_logs: ["personnel", "equipment", "rain"] };
+const JSON_COLUMNS: Record<string, string[]> = { progress_entries: ["values", "losses"], daily_logs: ["personnel", "equipment", "rain"] };
 
 export function pointEwkt(lat: unknown, lon: unknown): string | null {
   if (typeof lat !== "number" || typeof lon !== "number") return null;

@@ -481,6 +481,13 @@ export default function Simulador() {
                           ) : null}
                         </div>
                         {r.rateSource === "real" && !r.realReliable ? <div className="text-xs text-amber-700">pocos datos ({r.realSamples} d)</div> : null}
+                        {r.rateSource === "real" && r.realSamples > 0 ? (
+                          <div className="text-xs text-zinc-500">
+                            {r.realMachineDays
+                              ? `máquinas del parte en ${r.realMachineDays} de ${r.realSamples} d`
+                              : "por máquina asignada (el parte no dice en qué actividad trabajaron)"}
+                          </div>
+                        ) : null}
                       </td>
                       <td>
                         <input className="w-12 rounded border border-zinc-300 bg-white px-1.5 py-1 dark:border-zinc-700 dark:bg-zinc-950" value={r.currentUnits} onChange={(e) => setRow(r.id, { currentUnits: Math.max(1, num(e.target.value)) })} />

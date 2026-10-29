@@ -53,6 +53,26 @@ body {
   }
 }
 
+/* Hoja de informe: siempre clara (pantalla e impresión), con la paleta del modo claro */
+.report-sheet {
+  --viz-surface: #ffffff;
+  --viz-text: #0b0b0b;
+  --viz-text-2: #52514e;
+  --viz-grid: #e4e3df;
+  --viz-1: #2a78d6;
+  --viz-2: #eb6834;
+  --viz-3: #1baf7a;
+  --viz-4: #eda100;
+  --viz-5: #e87ba4;
+  --viz-good: #0ca30c;
+  --viz-critical: #d03b3b;
+  color-scheme: light;
+}
+.report-sheet table { border-collapse: collapse; }
+.report-sheet thead { display: table-header-group; }
+.report-sheet tr { break-inside: avoid; }
+.report-sheet h3 { break-after: avoid; }
+
 @page { size: A4; margin: 14mm; }
 @media print {
   body { background: #fff !important; color: #000 !important; print-color-adjust: exact; -webkit-print-color-adjust: exact; }

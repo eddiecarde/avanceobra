@@ -33,7 +33,7 @@ const SEV: Record<string, { label: string; tone: "neutral" | "amber" | "red" }> 
 
 /** Asistente con modelos de Meta: parte diario por voz (Muse Voice Transcribe + Muse Spark) y análisis de defectos (Muse Spark + SAM 3.1). */
 export default function Asistente() {
-  const { memberships } = useSession();
+  const { memberships, canUseAi } = useSession();
   const projects = useMemo(() => [...new Map(memberships.filter((m) => m.project).map((m) => [m.project_id, m.project!])).values()], [memberships]);
   const [picked, setPicked] = useState("");
   const projectId = picked || projects[0]?.id || "";
@@ -60,7 +60,11 @@ export default function Asistente() {
           </Field>
         ) : null}
       </div>
-      {projectId ? (
+      {projectId && !canUseAi(projectId) ? (
+        <p className="rounded-lg bg-amber-50 px-4 py-3 text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+          No tienes activado el asistente con IA en esta obra. Pídele al administrador que te lo active en Equipo.
+        </p>
+      ) : projectId ? (
         <>
           <VoiceReport key={`v-${projectId}`} projectId={projectId} />
           <DefectPhoto key={`d-${projectId}`} projectId={projectId} />
@@ -123,7 +127,7 @@ function VoiceReport({ projectId }: { projectId: string }) {
         r.onload = () => res(String(r.result).split(",")[1] ?? "");
         r.readAsDataURL(wav);
       });
-      const r = await callAi<{ text: string }>("transcribe", { audio_base64: b64 });
+      const r = await callAi<{ text: string }>("transcribe", { project_id: projectId, audio_base64: b64 });
       if (r.data === null) return setMsg({ tone: "error", text: r.error });
       setText((t) => [t.trim(), r.data.text].filter(Boolean).join(" "));
     } catch (e) {

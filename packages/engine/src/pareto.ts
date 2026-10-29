@@ -32,6 +32,22 @@ export function pareto(items: ParetoInput[], threshold = 0.8): ParetoRow[] {
   });
 }
 
+/** Una línea de pérdida de tiempo de un registro de avance (2 h Clima, 1 h Material…). */
+export interface LossLine {
+  cause: string;
+  hours: number;
+}
+
+/**
+ * Líneas de pérdida de un registro: el detalle si lo trae; si no (registros anteriores o teléfonos sin
+ * actualizar), una sola línea con las horas perdidas y su causa.
+ */
+export function entryLossLines(e: { lostHours: number; lossCause: string; losses?: LossLine[] | null }): LossLine[] {
+  const lines = (e.losses ?? []).filter((l) => l && l.cause && l.cause !== "none" && Number(l.hours) > 0).map((l) => ({ cause: l.cause, hours: Number(l.hours) }));
+  if (lines.length) return lines;
+  return e.lossCause && e.lossCause !== "none" && Number(e.lostHours) > 0 ? [{ cause: e.lossCause, hours: Number(e.lostHours) }] : [];
+}
+
 export type ParetoMetric = "lost_hours" | "lost_quantity" | "lost_cost" | "events";
 
 export interface LossRecord {

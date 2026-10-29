@@ -23,7 +23,7 @@ streams:
       mis_subcontratos: SELECT sub_company_id FROM memberships WHERE user_id = auth.user_id() AND org_suspended = false AND sub_company_id IS NOT NULL
     queries:
       - SELECT id, org_id, code, name, project_type, currency, start_date, contract_end_date, logo_path FROM projects WHERE id IN mis_obras
-      - SELECT id, user_id, project_id, role, member_name FROM memberships WHERE project_id IN mis_obras
+      - SELECT id, user_id, project_id, role, member_name, ai_enabled FROM memberships WHERE project_id IN mis_obras
       - SELECT id, project_id, code, name, max_parallel_resources FROM fronts WHERE project_id IN mis_obras
       - SELECT id, project_id, front_id, code, name, unit, contract_qty, planned_start, planned_finish, template_id FROM activities WHERE project_id IN mis_proyectos
       - SELECT id, project_id, front_id, code, name, unit, contract_qty, planned_start, planned_finish, template_id FROM activities WHERE company_id IN mis_subcontratos
@@ -43,8 +43,8 @@ streams:
       mis_proyectos: SELECT project_id FROM memberships WHERE user_id = auth.user_id() AND org_suspended = false AND sub_company_id IS NULL
       mis_subcontratos: SELECT sub_company_id FROM memberships WHERE user_id = auth.user_id() AND org_suspended = false AND sub_company_id IS NOT NULL
     queries:
-      - SELECT id, project_id, front_id, activity_id, template_version_id, work_date, quantity, effective_hours, lost_hours, loss_cause, weather, crew_size, notes, lat, lon, gps_accuracy_m, "values", status, signature_path, created_by, approved_by, approved_at, rejection_reason, device_id, client_created_at, version FROM progress_entries WHERE project_id IN mis_proyectos
-      - SELECT id, project_id, front_id, activity_id, template_version_id, work_date, quantity, effective_hours, lost_hours, loss_cause, weather, crew_size, notes, lat, lon, gps_accuracy_m, "values", status, signature_path, created_by, approved_by, approved_at, rejection_reason, device_id, client_created_at, version FROM progress_entries WHERE company_id IN mis_subcontratos
+      - SELECT id, project_id, front_id, activity_id, template_version_id, work_date, quantity, effective_hours, lost_hours, loss_cause, losses, weather, crew_size, notes, lat, lon, gps_accuracy_m, "values", status, signature_path, created_by, approved_by, approved_at, rejection_reason, device_id, client_created_at, version FROM progress_entries WHERE project_id IN mis_proyectos
+      - SELECT id, project_id, front_id, activity_id, template_version_id, work_date, quantity, effective_hours, lost_hours, loss_cause, losses, weather, crew_size, notes, lat, lon, gps_accuracy_m, "values", status, signature_path, created_by, approved_by, approved_at, rejection_reason, device_id, client_created_at, version FROM progress_entries WHERE company_id IN mis_subcontratos
       - SELECT id, project_id, entry_id, geojson, area_m2, is_approximate FROM progress_areas WHERE project_id IN mis_proyectos
       - SELECT id, project_id, entry_id, geojson, area_m2, is_approximate FROM progress_areas WHERE company_id IN mis_subcontratos
       - SELECT id, project_id, entry_id, element_id FROM entry_elements WHERE project_id IN mis_proyectos

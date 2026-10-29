@@ -60,3 +60,16 @@ describe("días reclamables por lluvia", () => {
     expect(claim.claimableDays).toBe(2);
   });
 });
+
+describe("máquinas por actividad del parte diario", () => {
+  it("suma por actividad y día e ignora los equipos sin actividad", async () => {
+    const { equipmentUnitsByActivity } = await import("../src/dailyLog.js");
+    const m = equipmentUnitsByActivity([
+      { date: "2026-10-20", equipment: [{ name: "Hincadora", qty: 2, activity_id: "hin" }, { name: "Retro", qty: 1 }] },
+      { date: "2026-10-20", equipment: [{ name: "Hincadora", qty: 1, activity_id: "hin" }] },
+      { date: "2026-10-21", equipment: [{ name: "Hincadora", qty: 1, activity_id: "hin" }, { name: "Volqueta", qty: 0, activity_id: "zan" }] },
+    ]);
+    expect([...m.get("hin")!.entries()]).toEqual([["2026-10-20", 3], ["2026-10-21", 1]]);
+    expect(m.has("zan")).toBe(false);
+  });
+});

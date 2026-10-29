@@ -38,4 +38,11 @@ describe("envío", () => {
     const call = toServerCall("daily_logs", "PUT", "l1", row);
     expect(call).toMatchObject({ kind: "upsert", table: "daily_logs", row: { id: "l1", personnel: [{ role: "Oficial", qty: 4 }], equipment: [{ name: "Retro", qty: 1 }] } });
   });
+  it("cada equipo puede llevar la actividad en la que trabajó", () => {
+    const row = toDailyLogRow(
+      { personnel: { Oficial: 2 }, equipment: { Hincadora: 2, Retro: 1 }, equipmentActivity: { Hincadora: "act-hin" }, rain: [], observations: "" },
+      { id: "l2", projectId: "p1", frontId: null, date: "2026-10-21", now: "2026-10-21T20:00:00Z" },
+    );
+    expect(JSON.parse(row.equipment)).toEqual([{ name: "Hincadora", qty: 2, activity_id: "act-hin" }, { name: "Retro", qty: 1 }]);
+  });
 });

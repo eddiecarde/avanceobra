@@ -12,6 +12,8 @@ export interface Membership {
   org_suspended?: boolean;
   /** Si es de un subcontratista: ve solo las actividades de su empresa. */
   sub_company_id?: string | null;
+  /** El administrador de la obra le activó el asistente con IA. */
+  ai_enabled?: boolean;
   project: { id: string; code: string; name: string; org_id: string } | null;
 }
 
@@ -33,6 +35,10 @@ interface SessionState {
   isPlatformAdmin: boolean;
   /** Todas las obras del usuario son de empresas suspendidas. */
   suspended: boolean;
+  /** Puede usar el asistente con IA en esa obra (lo activa el administrador; el dueño siempre). */
+  canUseAi: (projectId: string) => boolean;
+  /** Tiene el asistente activo en alguna obra (para mostrarlo en el menú). */
+  anyAi: boolean;
 }
 
 const PROJECT_KEY = "avanceobra:proyecto-actual";
@@ -72,7 +78,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }
     setLoading(true);
     void Promise.all([
-      supabase.from("memberships").select("project_id, org_id, role, org_suspended, sub_company_id, project:projects(id, code, name, org_id)").eq("user_id", session.user.id),
+      supabase.from("memberships").select("project_id, org_id, role, org_suspended, sub_company_id, ai_enabled, project:projects(id, code, name, org_id)").eq("user_id", session.user.id),
       supabase.from("platform_admins").select("user_id").eq("user_id", session.user.id).maybeSingle(),
     ]).then(([{ data }, owner]) => {
       const all = (data ?? []) as unknown as Membership[];
@@ -111,6 +117,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       reloadMemberships: () => setReloadKey((k) => k + 1),
       isPlatformAdmin,
       suspended: suspendedOnly,
+      canUseAi: (projectId: string) => isPlatformAdmin || memberships.some((m) => m.project_id === projectId && m.ai_enabled && !m.org_suspended),
+      anyAi: isPlatformAdmin || memberships.some((m) => m.ai_enabled && !m.org_suspended),
     };
   }, [loading, session, memberships, membershipsOf, currentProjectId, isPlatformAdmin, suspendedOnly]);
 

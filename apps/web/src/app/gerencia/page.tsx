@@ -10,7 +10,7 @@ import { useSession } from "@/lib/session";
 
 /** Vista de gerencia: todas las obras lado a lado, de la más comprometida a la más tranquila. */
 export default function Gerencia() {
-  const { memberships, setCurrentProjectId } = useSession();
+  const { memberships, setCurrentProjectId, canUseAi } = useSession();
   const router = useRouter();
   const projects = useMemo(() => [...new Map(memberships.filter((m) => m.project).map((m) => [m.project_id, m.project!])).values()], [memberships]);
   const today = localToday();
@@ -142,13 +142,15 @@ export default function Gerencia() {
                     <button className="font-semibold text-blue-700 hover:underline dark:text-blue-400" onClick={() => open(r.id, "/simulador")}>
                       Multa
                     </button>
-                    <button
-                      className="font-semibold text-blue-700 hover:underline dark:text-blue-400"
-                      onClick={() => setAiFor(r.id)}
-                      aria-label={`Resumen con IA de ${r.name}`}
-                    >
-                      Resumen IA
-                    </button>
+                    {canUseAi(r.id) ? (
+                      <button
+                        className="font-semibold text-blue-700 hover:underline dark:text-blue-400"
+                        onClick={() => setAiFor(r.id)}
+                        aria-label={`Resumen con IA de ${r.name}`}
+                      >
+                        Resumen IA
+                      </button>
+                    ) : null}
                   </td>
                 </tr>
               ))}

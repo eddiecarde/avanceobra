@@ -1,10 +1,14 @@
 "use client";
 
-import { reportWeeks } from "@avanceobra/engine";
+import { buildWeeklyAnalysis, reportWeeks, type WeeklyAnalysis } from "@avanceobra/engine";
 import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { FullTable } from "@/components/report/ActivityTables";
+import { ReportSheet, Signatures } from "@/components/report/ReportKit";
+import { WeeklyAnalysisView } from "@/components/report/WeeklyAnalysisView";
 import { Button, cx, downloadBlob, Field, Select } from "@/components/ui";
-import { loadDashboard, localToday, type DashData } from "@/lib/dashboard";
+import { loadDashboard, localToday, LOSS_LABEL, type DashData } from "@/lib/dashboard";
+import { dmy, reportInput } from "@/lib/report";
 import { useCurrentProject, useSession } from "@/lib/session";
 import {
   buildWeeklyReport,
@@ -27,16 +31,20 @@ const th = "border border-zinc-300 bg-[#1f4e79] px-2 py-1 text-center text-[11px
 const thLight = "border border-zinc-300 bg-[#ddebf7] px-2 py-1 text-center text-[11px] font-bold uppercase text-zinc-800";
 const td = "border border-zinc-300 px-2 py-1 align-top";
 
+/** Anexos en el formato de control del cliente (tablas completas para la trazabilidad). */
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="mt-5 break-inside-avoid-page">
-      <h2 className="bg-[#1f4e79] px-2 py-1 text-center text-sm font-extrabold uppercase tracking-wide text-white">{title}</h2>
+    <section className="mt-5">
+      <h2 className="bg-[#1f4e79] px-2 py-1 text-center text-sm font-extrabold uppercase tracking-wide text-white [break-after:avoid]">{title}</h2>
       <div className="mt-2">{children}</div>
     </section>
   );
 }
 
-/** Informe semanal en el formato del cliente (CNX-PSS-001 · Helios): pantalla, impresión y Excel. */
+/**
+ * Informe semanal: primero el análisis (resumen, situaciones, tendencias, desviaciones y riesgos) y
+ * después, como anexos, las tablas del formato de control del cliente. Pantalla, impresión y Excel.
+ */
 const SHOWN_WEEKS = 8;
 
 export default function Semanal() {
@@ -44,11 +52,18 @@ export default function Semanal() {
   const projects = useMemo(() => [...new Map(memberships.filter((m) => m.project).map((m) => [m.project_id, m.project!])).values()], [memberships]);
   const [picked, setPicked] = useCurrentProject();
   const projectId = picked || projects[0]?.id || "";
-  const [loaded, setLoaded] = useState<{ projectId: string; data?: DashData; error?: string } | null>(null);
+  const [loaded, setLoaded] = useState<{
+    projectId: string;
+    data?: DashData;
+    error?: string;
+  } | null>(null);
   const data = loaded?.projectId === projectId ? (loaded.data ?? null) : null;
   const error = loaded?.projectId === projectId ? (loaded.error ?? null) : null;
   const [weekIndex, setWeekIndex] = useState<number | null>(null);
-  const [photos, setPhotos] = useState<{ key: string; list: WeeklyReport["photos"] } | null>(null);
+  const [photos, setPhotos] = useState<{
+    key: string;
+    list: WeeklyReport["photos"];
+  } | null>(null);
   const [busy, setBusy] = useState(false);
   const today = localToday();
 
@@ -72,7 +87,10 @@ export default function Semanal() {
   // Primero el avance (rápido); luego, por semana, parte diario, ensayos, restricciones y fotos
   const base = useMemo(() => (data ? buildWeeklyReport(data, selected, today) : null), [data, selected, today]);
   const weekKey = base ? `${projectId}:${base.week.start}` : "";
-  const [extras, setExtras] = useState<{ key: string; value: WeekExtras } | null>(null);
+  const [extras, setExtras] = useState<{
+    key: string;
+    value: WeekExtras;
+  } | null>(null);
   useEffect(() => {
     if (!base || !projectId) return;
     let off = false;
@@ -85,9 +103,15 @@ export default function Semanal() {
   }, [projectId, base]);
   const weekPhotos = photos?.key === weekKey ? photos.list : [];
   const weekExtras = extras?.key === weekKey ? extras.value : null;
-  const report = useMemo(
-    () => (data && base ? buildWeeklyReport(data, selected, today, [], weekExtras ?? emptyExtras()) : null),
-    [data, base, selected, today, weekExtras],
+  const report = useMemo(() => (data && base ? buildWeeklyReport(data, selected, today, [], weekExtras ?? emptyExtras()) : null), [data, base, selected, today, weekExtras]);
+  const analysis = useMemo(
+    () =>
+      data && base
+        ? buildWeeklyAnalysis(reportInput(data), base.week.start, today, {
+            labels: { loss: LOSS_LABEL },
+          })
+        : null,
+    [data, base, today],
   );
 
   async function exportXlsx() {
@@ -152,25 +176,37 @@ export default function Semanal() {
         </p>
       ) : null}
       {error ? <p className="text-red-700">No se pudo cargar: {error}</p> : null}
-      {!report ? (
-        !error ? <p className="text-zinc-500">Preparando el informe…</p> : null
-      ) : (
-        <Sheet r={report} photos={weekPhotos} />
-      )}
+      {!report || !analysis ? !error ? <p className="text-zinc-500">Preparando el informe…</p> : null : <Sheet r={report} a={analysis} photos={weekPhotos} />}
     </div>
   );
 }
 
-function Sheet({ r, photos }: { r: WeeklyReport; photos: WeeklyReport["photos"] }) {
+function Sheet({ r, a, photos }: { r: WeeklyReport; a: WeeklyAnalysis; photos: WeeklyReport["photos"] }) {
   const { data, progress, week, weekPos } = r;
   const h = data.project.header;
   // En pantalla, las últimas 8 semanas (una obra grande tiene más de cien); el Excel trae todas
   const firstShown = Math.max(0, weekPos + 1 - SHOWN_WEEKS);
   const pastWeeks = progress.weeks.slice(firstShown, weekPos + 1);
+  // Impresas, solo las últimas 4 semanas (más columnas no caben en A4 sin encoger la hoja)
+  const printFrom = Math.max(0, pastWeeks.length - 4);
+  // Filas con movimiento: el ejecutado diario solo con producción en la semana; el seguimiento,
+  // solo actividades que cambian o siguen abiertas en las semanas mostradas (el Excel trae todas)
+  const producedRows = progress.rows.filter((a) => r.dailyQty.get(a.id)!.some((q) => q !== 0));
+  const trackedRows = progress.rows.filter((a) =>
+    pastWeeks.some((_, wi) => {
+      const k = firstShown + wi;
+      const act = a.actual[k] ?? 0;
+      const closedBefore = k > 0 && (a.actual[k - 1] ?? 0) >= 1 - 1e-9 && a.planned[k - 1]! >= 1 - 1e-9;
+      return (a.planned[k]! > 0 || act > 0) && !closedBefore;
+    }),
+  );
+  const omitted = (n: number) =>
+    n < progress.rows.length ? (
+      <p className="mb-1 text-xs text-zinc-500">{`${n} de ${progress.rows.length} actividades: se omiten las que no tienen movimiento en el periodo (el Excel trae todas).`}</p>
+    ) : null;
   return (
-    // Hoja siempre clara, igual a como sale impresa
-    <article className="mx-auto max-w-[1100px] rounded-lg bg-white p-6 text-[13px] leading-snug text-zinc-900 shadow-sm ring-1 ring-zinc-200 print:max-w-none print:p-0 print:shadow-none print:ring-0">
-      <header className={cx("grid border border-zinc-400", h.logoUrl ? "grid-cols-[auto_1fr_auto]" : "grid-cols-[1fr_auto]")}>
+    <ReportSheet wide running={`${data.project.name} · Informe semanal N.° ${week.index} · ${dmy(week.start)} – ${dmy(week.end)}`}>
+      <div role="banner" className={cx("grid border border-zinc-400", h.logoUrl ? "grid-cols-[auto_1fr_auto]" : "grid-cols-[1fr_auto]")}>
         {h.logoUrl ? (
           <div className="flex items-center border-r border-zinc-400 px-2">
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -183,7 +219,7 @@ function Sheet({ r, photos }: { r: WeeklyReport; photos: WeeklyReport["photos"] 
           <br />
           Fecha: <b>{week.lastWorkday.split("-").reverse().join("/")}</b>
         </div>
-      </header>
+      </div>
       <div className="overflow-x-auto print:overflow-visible">
         <table className="mt-2 w-full border-collapse">
           <tbody>
@@ -203,7 +239,20 @@ function Sheet({ r, photos }: { r: WeeklyReport; photos: WeeklyReport["photos"] 
         </table>
       </div>
 
-      <Section title="Control de avance por actividad">
+      <WeeklyAnalysisView a={a} alerts={r.risks} startDate={data.project.startDate} />
+
+      <section className="mt-7">
+        <h2 className="border-b-2 border-[#1f3a5f] pb-1 text-[15px] font-extrabold uppercase tracking-wide text-[#1f3a5f]">Firmas — reunión de seguimiento semanal</h2>
+        <Signatures signers={h.signers.length ? h.signers : ["Residente de obra", "Director de obra"]} />
+      </section>
+
+      <div className="print-break" />
+      <h2 className="mt-10 text-[17px] font-extrabold uppercase tracking-wide text-[#1f3a5f]">Anexos · detalle para la trazabilidad</h2>
+      <Section title="Anexo A · Seguimiento de actividades al corte">
+        <FullTable rows={a.end.rows} grouped={data.activities.some((x) => x.workGroup)} />
+      </Section>
+
+      <Section title="Anexo B · Control de avance por actividad">
         <div className="overflow-x-auto print:overflow-visible">
           <table className="w-full border-collapse">
             <thead>
@@ -245,7 +294,8 @@ function Sheet({ r, photos }: { r: WeeklyReport; photos: WeeklyReport["photos"] 
         </div>
       </Section>
 
-      <Section title={`Ejecutado diario · semana ${week.index}`}>
+      <Section title={`Anexo C · Ejecutado diario · semana ${week.index}`}>
+        {producedRows.length ? omitted(producedRows.length) : <p className="text-sm text-zinc-600">Sin producción registrada en la semana.</p>}
         <div className="overflow-x-auto print:overflow-visible">
           <table className="w-full border-collapse">
             <thead>
@@ -260,7 +310,7 @@ function Sheet({ r, photos }: { r: WeeklyReport; photos: WeeklyReport["photos"] 
               </tr>
             </thead>
             <tbody>
-              {progress.rows.map((a) => (
+              {producedRows.map((a) => (
                 <tr key={a.id}>
                   <td className={td}>{a.name}</td>
                   {r.dailyQty.get(a.id)!.map((q, i) => (
@@ -276,7 +326,11 @@ function Sheet({ r, photos }: { r: WeeklyReport; photos: WeeklyReport["photos"] 
         </div>
       </Section>
 
-      <Section title={firstShown > 0 ? `Seguimiento semanal de avance · últimas ${SHOWN_WEEKS} semanas (el Excel trae todas)` : "Seguimiento semanal de avance"}>
+      <Section
+        title={firstShown > 0 ? `Anexo D · Seguimiento semanal de avance · últimas ${SHOWN_WEEKS} semanas (el Excel trae todas)` : "Anexo D · Seguimiento semanal de avance"}
+      >
+        {omitted(trackedRows.length)}
+        {printFrom > 0 ? <p className="mb-1 hidden text-xs text-zinc-500 print:block">Impreso con las últimas 4 semanas; en pantalla y en el Excel están todas.</p> : null}
         <div className="overflow-x-auto print:overflow-visible">
           <table className="w-full border-collapse">
             <thead>
@@ -284,27 +338,40 @@ function Sheet({ r, photos }: { r: WeeklyReport; photos: WeeklyReport["photos"] 
                 <th className={th} rowSpan={2}>
                   Actividad
                 </th>
-                {pastWeeks.map((w) => (
-                  <th key={w.index} className={th} colSpan={3}>
+                {pastWeeks.map((w, wi) => (
+                  <th key={w.index} className={cx(th, wi < printFrom && "print:hidden")} colSpan={3}>
                     Semana {w.index}
                     <div className="font-normal normal-case">{weekLabel(w)}</div>
                   </th>
                 ))}
               </tr>
               <tr>
-                {pastWeeks.flatMap((w) => ["% prog.", "% ejec.", "Δ desv."].map((c) => <th key={`${w.index}${c}`} className={thLight}>{c}</th>))}
+                {pastWeeks.flatMap((w, wi) =>
+                  ["% prog.", "% ejec.", "Δ desv."].map((c) => (
+                    <th key={`${w.index}${c}`} className={cx(thLight, wi < printFrom && "print:hidden")}>
+                      {c}
+                    </th>
+                  )),
+                )}
               </tr>
             </thead>
             <tbody>
-              {progress.rows.map((a) => (
+              {trackedRows.map((a) => (
                 <tr key={a.id}>
                   <td className={td}>{a.name}</td>
                   {pastWeeks.flatMap((_, wi) => {
+                    const hide = wi < printFrom ? "print:hidden" : "";
                     const dev = a.actual[firstShown + wi] == null ? null : a.actual[firstShown + wi]! - a.planned[firstShown + wi]!;
                     return [
-                      <td key={`p${wi}`} className={`${td} text-right tabular-nums whitespace-nowrap`}>{pct(a.planned[firstShown + wi])}</td>,
-                      <td key={`e${wi}`} className={`${td} text-right tabular-nums whitespace-nowrap`}>{pct(a.actual[firstShown + wi])}</td>,
-                      <td key={`d${wi}`} className={`${td} text-right tabular-nums whitespace-nowrap ${dev != null && dev < -0.05 ? "font-bold text-red-700" : ""}`}>{pct(dev)}</td>,
+                      <td key={`p${wi}`} className={`${td} ${hide} text-right tabular-nums whitespace-nowrap`}>
+                        {pct(a.planned[firstShown + wi])}
+                      </td>,
+                      <td key={`e${wi}`} className={`${td} ${hide} text-right tabular-nums whitespace-nowrap`}>
+                        {pct(a.actual[firstShown + wi])}
+                      </td>,
+                      <td key={`d${wi}`} className={`${td} ${hide} text-right tabular-nums whitespace-nowrap ${dev != null && dev < -0.05 ? "font-bold text-red-700" : ""}`}>
+                        {pct(dev)}
+                      </td>,
                     ];
                   })}
                 </tr>
@@ -312,9 +379,13 @@ function Sheet({ r, photos }: { r: WeeklyReport; photos: WeeklyReport["photos"] 
               <tr className="font-bold">
                 <td className={td}>AVANCE GENERAL PONDERADO</td>
                 {pastWeeks.flatMap((_, wi) => [
-                  <td key={`p${wi}`} className={`${td} text-right tabular-nums whitespace-nowrap`}>{pct(progress.totalPlanned[firstShown + wi])}</td>,
-                  <td key={`e${wi}`} className={`${td} text-right tabular-nums whitespace-nowrap`}>{pct(progress.totalActual[firstShown + wi])}</td>,
-                  <td key={`d${wi}`} className={`${td} text-right tabular-nums whitespace-nowrap`}>
+                  <td key={`p${wi}`} className={cx(td, wi < printFrom && "print:hidden", "text-right tabular-nums whitespace-nowrap")}>
+                    {pct(progress.totalPlanned[firstShown + wi])}
+                  </td>,
+                  <td key={`e${wi}`} className={cx(td, wi < printFrom && "print:hidden", "text-right tabular-nums whitespace-nowrap")}>
+                    {pct(progress.totalActual[firstShown + wi])}
+                  </td>,
+                  <td key={`d${wi}`} className={cx(td, wi < printFrom && "print:hidden", "text-right tabular-nums whitespace-nowrap")}>
                     {progress.totalActual[firstShown + wi] == null ? "—" : pct(progress.totalActual[firstShown + wi]! - progress.totalPlanned[firstShown + wi]!)}
                   </td>,
                 ])}
@@ -324,7 +395,7 @@ function Sheet({ r, photos }: { r: WeeklyReport; photos: WeeklyReport["photos"] 
         </div>
       </Section>
 
-      <Section title="Clima y lluvia por día">
+      <Section title="Anexo E · Clima y lluvia por día">
         <div className="overflow-x-auto print:overflow-visible">
           <table className="w-full border-collapse">
             <thead>
@@ -354,13 +425,11 @@ function Sheet({ r, photos }: { r: WeeklyReport; photos: WeeklyReport["photos"] 
           </table>
         </div>
         {r.logs.some((l) => l?.observations.length) ? (
-          <ul className="mt-2 list-disc pl-6 text-sm">
-            {r.logs.flatMap((l, i) => (l?.observations ?? []).map((o) => <li key={`${i}${o}`}>{`${DAY[i]}: ${o}`}</li>))}
-          </ul>
+          <ul className="mt-2 list-disc pl-6 text-sm">{r.logs.flatMap((l, i) => (l?.observations ?? []).map((o) => <li key={`${i}${o}`}>{`${DAY[i]}: ${o}`}</li>))}</ul>
         ) : null}
       </Section>
 
-      <Section title="Personal y equipos por día">
+      <Section title="Anexo F · Personal y equipos por día">
         {r.roles.length || r.equipment.length ? (
           <div className="overflow-x-auto print:overflow-visible">
             <table className="w-full border-collapse">
@@ -426,19 +495,7 @@ function Sheet({ r, photos }: { r: WeeklyReport; photos: WeeklyReport["photos"] 
         )}
       </Section>
 
-      <Section title="Alertas y restricciones de la semana">
-        {r.alerts.length ? (
-          <ol className="list-decimal space-y-1 pl-6">
-            {r.alerts.map((a) => (
-              <li key={a}>{a}</li>
-            ))}
-          </ol>
-        ) : (
-          <p>Sin alertas.</p>
-        )}
-      </Section>
-
-      <Section title="Ensayos y pruebas — estado">
+      <Section title="Anexo G · Ensayos y pruebas — estado">
         {r.tests.length ? (
           <div className="overflow-x-auto print:overflow-visible">
             <table className="w-full border-collapse">
@@ -478,7 +535,7 @@ function Sheet({ r, photos }: { r: WeeklyReport; photos: WeeklyReport["photos"] 
       </Section>
 
       {r.constraints.some((c) => c.status === "liberada") ? (
-        <Section title="Restricciones liberadas en la semana">
+        <Section title="Anexo H · Restricciones liberadas en la semana">
           <ul className="list-disc pl-6">
             {r.constraints
               .filter((c) => c.status === "liberada")
@@ -493,7 +550,7 @@ function Sheet({ r, photos }: { r: WeeklyReport; photos: WeeklyReport["photos"] 
       ) : null}
 
       {photos.length ? (
-        <Section title="Registro fotográfico">
+        <Section title="Anexo I · Registro fotográfico">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 print:grid-cols-3">
             {photos.map((p) => (
               <figure key={p.url} className="break-inside-avoid">
@@ -505,16 +562,6 @@ function Sheet({ r, photos }: { r: WeeklyReport; photos: WeeklyReport["photos"] 
           </div>
         </Section>
       ) : null}
-
-      <Section title="Firmas — reunión de seguimiento semanal">
-        <div className="mt-12 grid grid-cols-2 gap-x-12 gap-y-14">
-          {h.signers.map((s) => (
-            <div key={s} className="border-t border-zinc-900 pt-1 text-center text-sm font-bold uppercase">
-              {s}
-            </div>
-          ))}
-        </div>
-      </Section>
-    </article>
+    </ReportSheet>
   );
 }

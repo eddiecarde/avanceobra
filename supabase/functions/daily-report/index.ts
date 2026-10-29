@@ -8,7 +8,7 @@ import { fanOut } from "../_shared/fanout.ts";
 import type { Contact } from "../_shared/alerts.ts";
 import { sendTelegramDocument, sendTelegramHtml } from "../_shared/channels.ts";
 import { loadBlockers } from "../_shared/blockers.ts";
-import { addDays } from "../_shared/engine.js";
+import { addDays, summarizeDailyLogs } from "../_shared/engine.js";
 import { bogotaDate, buildDailyReport, nightSummaryHtml, type RawDashboard } from "../_shared/report.ts";
 import { buildReportPdf } from "../_shared/report_pdf.ts";
 
@@ -55,6 +55,18 @@ Deno.serve(async (req) => {
       continue;
     }
     const report = buildDailyReport(raw as RawDashboard, day);
+    // Personal y equipos del parte diario (si se envió), para el resumen del PDF
+    const { data: logs } = await db.from("daily_log_latest").select("log_date, personnel, equipment, rain, observations").eq("project_id", p.id).eq("log_date", day);
+    const log = summarizeDailyLogs(
+      ((logs ?? []) as { log_date: string; personnel: { role: string; qty: number }[]; equipment: { name: string; qty: number }[]; rain: { start: string; end: string }[]; observations: string }[]).map((x) => ({
+        date: x.log_date,
+        personnel: x.personnel ?? [],
+        equipment: x.equipment ?? [],
+        rain: x.rain ?? [],
+        observations: x.observations,
+      })),
+    ).get(day);
+    report.dayLog = log ? { personnel: log.totalPersonnel, equipment: Object.values(log.equipment).reduce((s, n) => s + n, 0) } : null;
     const html = nightSummaryHtml(report, await loadBlockers(db, p.id, raw as RawDashboard, addDays(day, -1)), webUrl);
     const pdf = await buildReportPdf(report);
     if (body.dry_run) {

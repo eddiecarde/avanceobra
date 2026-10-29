@@ -69,6 +69,8 @@ export const ProgressEntryInput = z.object({
   effective_hours: z.number().min(0).max(24),
   lost_hours: z.number().min(0).max(24).default(0),
   loss_cause: LossCause.default("none"),
+  // Varias causas en un registro; lost_hours es su suma y loss_cause la de más horas
+  losses: z.array(z.object({ cause: LossCause.exclude(["none"]), hours: z.number().positive().max(24) })).default([]),
   weather: Weather.nullable(),
   crew_size: z.number().int().nonnegative().default(0),
   notes: z.string().max(2000).default(""),

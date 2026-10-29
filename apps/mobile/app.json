@@ -2,7 +2,7 @@
   "expo": {
     "name": "AvanceObra",
     "slug": "avanceobra",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "avanceobra",
@@ -12,7 +12,9 @@
       "bundleIdentifier": "co.avanceobra.app",
       "infoPlist": {
         "NSCameraUsageDescription": "Para fotos de evidencia y escanear códigos QR de elementos.",
-        "NSLocationWhenInUseUsageDescription": "Para georreferenciar los registros de avance y hallazgos."
+        "NSLocationWhenInUseUsageDescription": "Para georreferenciar los registros de avance y hallazgos.",
+        "NSMicrophoneUsageDescription": "Para dictar el parte diario con la voz.",
+        "NSSpeechRecognitionUsageDescription": "Para convertir en texto lo que dictas en el parte diario."
       }
     },
     "android": {
@@ -25,11 +27,6 @@
       "predictiveBackGestureEnabled": false,
       "package": "co.avanceobra.app",
       "permissions": [
-        "android.permission.CAMERA",
-        "android.permission.ACCESS_FINE_LOCATION",
-        "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.POST_NOTIFICATIONS",
-        "android.permission.RECORD_AUDIO",
         "android.permission.CAMERA",
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_COARSE_LOCATION",
@@ -73,6 +70,17 @@
         "expo-image-picker",
         {
           "cameraPermission": "Para fotos de evidencia."
+        }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Para dictar el parte diario con la voz.",
+          "speechRecognitionPermission": "Para convertir en texto lo que dictas en el parte diario.",
+          "androidSpeechServicePackages": [
+            "com.google.android.googlequicksearchbox",
+            "com.google.android.as"
+          ]
         }
       ]
     ],

@@ -35,9 +35,32 @@ test("informe diario: resumen del día y producción por actividad", async ({ pa
   await page.goto(`/informe?p=${PROJECT_ID}&d=${TODAY}`);
   const sheet = page.locator("article");
   await expect(sheet.getByText("Informe diario de obra")).toBeVisible();
-  await expect(sheet.getByRole("heading", { name: "Producción del día por actividad" })).toBeVisible();
-  await expect(sheet.getByRole("cell", { name: /BA-HIN/ })).toBeVisible();
+  for (const s of [
+    "Resumen ejecutivo",
+    "Situaciones del día",
+    "Actividades que requieren atención",
+    "Producción del día",
+    "Hallazgos y riesgos",
+    "Anexo A · Seguimiento completo de actividades",
+  ])
+    await expect(sheet.getByRole("heading", { name: s })).toBeVisible();
+  await expect(sheet.getByRole("cell", { name: /BA-HIN/ }).first()).toBeVisible();
   await expect(sheet.getByText("8 pilotes").first()).toBeVisible();
+  // Personal del parte diario (no la suma de cuadrillas) y criterios del semáforo documentados
+  await expect(sheet.getByText("Parte diario · 2 equipo(s)")).toBeVisible();
+  await expect(sheet.getByText("Criterios del semáforo")).toBeVisible();
+});
+
+test("informe semanal: análisis antes de los anexos, con gráficos y desviaciones", async ({ page }) => {
+  await mockSupabase(page, buildDb());
+  await page.goto("/semanal");
+  const sheet = page.locator("article");
+  for (const s of ["Resumen semanal", "Situaciones de la semana", "Gráficos y tendencias", "Análisis de desviaciones", "Riesgos y acciones pendientes"])
+    await expect(sheet.getByRole("heading", { name: s })).toBeVisible();
+  await expect(sheet.getByRole("img", { name: /Curva S al/ })).toBeVisible();
+  await expect(sheet.getByText("Fecha compromiso: no registrada").first()).toBeVisible();
+  // Las desviaciones por actividad no se repiten en la lista de riesgos
+  await expect(sheet.getByText(/ejecutado contra .* programado \(desviación/)).toHaveCount(0);
 });
 
 test("simulador: sin costos guía a cargarlos en vez de mostrar escenarios iguales", async ({ page }) => {

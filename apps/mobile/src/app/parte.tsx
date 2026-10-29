@@ -11,9 +11,12 @@ import { supabase } from "../services/supabase";
 import { useSession } from "../state/session";
 import { BigButton, Body, Card, Chips, Input, Label, Row, Screen, Title } from "../ui/components";
 import { useTheme } from "../ui/theme";
+import { VoiceDictation } from "../ui/VoiceDictation";
+import { useAiAccess } from "../state/useAiAccess";
 
 const addDays = (d: string, n: number) => new Date(Date.parse(`${d}T12:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 const ALL = "__todo__";
+const NONE = "__ninguna__";
 
 /** Fila con − cantidad + grandes, para contar personal o equipos con guantes. */
 function Counter({ label, value, onChange }: { label: string; value: number; onChange: (n: number) => void }) {
@@ -72,6 +75,7 @@ export default function Parte() {
   const [rainEnd, setRainEnd] = useState("");
   const loadedKey = useRef<string | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
+  const aiAllowed = useAiAccess();
 
   const { data: fronts } = useQuery<{ id: string; code: string; name: string }>("SELECT id, code, name FROM fronts WHERE project_id = ? ORDER BY code", [projectId ?? ""]);
   const { data: activities } = useQuery<{ id: string; code: string; name: string; unit: string; front_id: string }>(
@@ -146,6 +150,24 @@ export default function Parte() {
   }, [draft, key, userId, projectId, date, front, submittedAt]);
 
   const setQty = (kind: "personnel" | "equipment", name: string, n: number) => setDraft((d) => ({ ...d, [kind]: { ...d[kind], [name]: n } }));
+  const setEquipmentActivity = (name: string, activityId: string) =>
+    setDraft((d) => {
+      const next = { ...(d.equipmentActivity ?? {}) };
+      if (activityId === NONE) delete next[name];
+      else next[name] = activityId;
+      return { ...d, equipmentActivity: next };
+    });
+  // Actividades para asignar equipos: las del frente elegido, o las que tuvieron avance en las últimas 2 semanas
+  const { data: recent } = useQuery<{ activity_id: string }>("SELECT DISTINCT activity_id FROM progress_entries WHERE project_id = ? AND work_date >= ?", [
+    projectId ?? "",
+    addDays(today, -14),
+  ]);
+  const equipmentActivities = useMemo(() => {
+    const recentIds = new Set(recent.map((r) => r.activity_id));
+    const list = front === ALL ? activities.filter((a) => recentIds.has(a.id)) : activities.filter((a) => a.front_id === front);
+    const chosen = new Set(Object.values(draft.equipmentActivity ?? {}));
+    return [...list.slice(0, 12), ...activities.filter((a) => chosen.has(a.id) && !list.slice(0, 12).includes(a))];
+  }, [activities, recent, front, draft.equipmentActivity]);
   const totalPeople = Object.values(draft.personnel).reduce((s, n) => s + n, 0);
   const totalEquip = Object.values(draft.equipment).reduce((s, n) => s + n, 0);
 
@@ -226,11 +248,14 @@ export default function Parte() {
           </Card>
         ) : null}
 
+        {aiAllowed ? (
+          <>
         <Title>🎙 Dictar el parte</Title>
         <Body muted>
-          Toca el micrófono del teclado y cuenta el día: qué hicieron y cuánto, cuánta gente y qué equipos, si llovió (de qué hora a qué hora) y los problemas.
-          La IA de Meta (Muse Spark) llena el parte y tú lo revisas antes de enviar.
+          Toca «Hablar» y cuenta el día: qué hicieron y cuánto, cuánta gente y qué equipos, si llovió (de qué hora a qué hora) y los problemas.
+          Luego toca «Llenar el parte con IA» y revisa antes de enviar.
         </Body>
+        <VoiceDictation onText={(s) => setDraft((d) => ({ ...d, dictation: `${(d.dictation ?? "").trim()} ${s}`.trim() }))} />
         <Input
           value={draft.dictation ?? ""}
           onChangeText={(s) => setDraft((d) => ({ ...d, dictation: s }))}
@@ -240,6 +265,9 @@ export default function Parte() {
           style={{ minHeight: 110, textAlignVertical: "top", paddingTop: 12 }}
         />
         <BigButton title="✨ Llenar el parte con IA" loading={aiBusy} disabled={(draft.dictation ?? "").trim().length < 8} onPress={() => void fillWithAi()} />
+        {(draft.dictation ?? "").trim().length < 8 ? <Body muted>Dicta o escribe el parte para poder llenarlo con IA.</Body> : null}
+          </>
+        ) : null}
         {draft.ai && (dictated.length || draft.ai.findings.length || draft.ai.unmatched.length) ? (
           <Card accent={t.primary}>
             {dictated.length ? <Label>Avance dictado: tócalo para registrarlo con su foto</Label> : null}
@@ -282,7 +310,19 @@ export default function Parte() {
 
         <Title>{`Equipos · ${totalEquip}`}</Title>
         {equipment.map((e) => (
-          <Counter key={e} label={e} value={draft.equipment[e] ?? 0} onChange={(n) => setQty("equipment", e, n)} />
+          <View key={e}>
+            <Counter label={e} value={draft.equipment[e] ?? 0} onChange={(n) => setQty("equipment", e, n)} />
+            {(draft.equipment[e] ?? 0) > 0 && equipmentActivities.length ? (
+              <View style={{ gap: 6, paddingBottom: 8 }}>
+                <Label>{`¿En qué actividad trabajó ${e}?`}</Label>
+                <Chips
+                  options={[{ value: NONE, label: "Sin indicar" }, ...equipmentActivities.map((a) => ({ value: a.id, label: a.code }))]}
+                  value={draft.equipmentActivity?.[e] ?? NONE}
+                  onChange={(v) => setEquipmentActivity(e, v)}
+                />
+              </View>
+            ) : null}
+          </View>
         ))}
         <Row>
           <Input value={newEquipment} onChangeText={setNewEquipment} placeholder="Otro equipo" style={{ flex: 1 }} />

@@ -103,10 +103,37 @@ export function isWorkingDay(d: ISODate, cal: WorkCalendar = {}, holidays?: Set<
 /** Días laborables en el intervalo [from, to], ambos inclusive. */
 export function workingDaysBetween(from: ISODate, to: ISODate, cal: WorkCalendar = {}): number {
   if (diffDays(from, to) < 0) return 0;
+  // Calendarios con nombre (los de un proyecto): tabla acumulada en memoria, O(1) por consulta.
+  // Los informes cuentan días para miles de actividades y varias fechas de corte.
+  if (Object.keys(cal).length && diffDays(from, to) > 31) {
+    let c = tables.get(cal);
+    if (!c || from < c.from || to > c.to) {
+      const lo = c && c.from < from ? c.from : addDays(from, -366);
+      const hi = c && c.to > to ? c.to : addDays(to, 366);
+      c = { from: lo, to: hi, count: countTable(cal, lo, hi) };
+      tables.set(cal, c);
+    }
+    return c.count(from, to);
+  }
+  return countLoop(from, to, cal);
+}
+
+function countLoop(from: ISODate, to: ISODate, cal: WorkCalendar): number {
   const set = buildHolidaySet(cal, parseDate(from).getUTCFullYear(), parseDate(to).getUTCFullYear());
   let n = 0;
   for (let d = from; diffDays(d, to) >= 0; d = addDays(d, 1)) if (isWorkingDay(d, cal, set)) n++;
   return n;
+}
+
+const tables = new WeakMap<WorkCalendar, { from: ISODate; to: ISODate; count: (a: ISODate, b: ISODate) => number }>();
+
+function countTable(cal: WorkCalendar, from: ISODate, to: ISODate) {
+  const n = diffDays(from, to) + 1;
+  const set = buildHolidaySet(cal, parseDate(from).getUTCFullYear(), parseDate(to).getUTCFullYear());
+  const cum = new Int32Array(n + 1);
+  let d = from;
+  for (let i = 0; i < n; i++, d = addDays(d, 1)) cum[i + 1] = cum[i]! + (isWorkingDay(d, cal, set) ? 1 : 0);
+  return (a: ISODate, b: ISODate) => cum[diffDays(from, b) + 1]! - cum[diffDays(from, a)]!;
 }
 
 /**

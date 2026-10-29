@@ -5,7 +5,7 @@ import { mockSupabase } from "./mock";
 test("dashboard: cantidades ejecutadas, aprobadas y saldo por actividad", async ({ page }) => {
   await mockSupabase(page, buildDb());
   await page.goto("/dashboard");
-  await expect(page.getByRole("definition").filter({ hasText: /^\d+,\d %$/ }).nth(2)).toBeVisible();
+  await expect(page.getByRole("definition").filter({ hasText: /^\d+(,\d)? %$/ }).nth(2)).toBeVisible();
   await page.getByRole("tab", { name: "Cantidades" }).click();
   await expect(page.getByRole("heading", { name: "Cantidades por actividad" })).toBeVisible();
   // BA-HIN: 200 contratados, 15 días × 8 = 120 ejecutados, los 2 últimos días (16) aún por aprobar

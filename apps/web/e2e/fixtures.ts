@@ -101,7 +101,7 @@ export function buildDb(role: "admin" | "resident" | "field" = "admin"): MockDb 
     equipment_types: ["Hincadora"],
   };
   const tables: Record<string, Row[]> = {
-    memberships: [{ user_id: USER.id, project_id: PROJECT_ID, org_id: "org1", role, project: { id: PROJECT_ID, code: "PSP", name: project.name, org_id: "org1" } }],
+    memberships: [{ user_id: USER.id, project_id: PROJECT_ID, org_id: "org1", role, ai_enabled: true, project: { id: PROJECT_ID, code: "PSP", name: project.name, org_id: "org1" } }],
     projects: [project],
     fronts,
     activities,
@@ -147,8 +147,8 @@ export function buildDb(role: "admin" | "resident" | "field" = "admin"): MockDb 
     };
   };
   const team = [
-    { user_id: USER.id, name: "Eddie Cárdenas", email: USER.email, role: "admin", telegram_linked: true, last_sign_in_at: `${day(0)}T12:00:00Z`, must_change_password: false },
-    { user_id: "u-marta", name: "Marta", email: "marta@obra.test", role: "field", telegram_linked: false, last_sign_in_at: null, must_change_password: false },
+    { user_id: USER.id, name: "Eddie Cárdenas", email: USER.email, role: "admin", telegram_linked: true, last_sign_in_at: `${day(0)}T12:00:00Z`, must_change_password: false, ai_enabled: true },
+    { user_id: "u-marta", name: "Marta", email: "marta@obra.test", role: "field", telegram_linked: false, last_sign_in_at: null, must_change_password: false, ai_enabled: false },
   ];
   // Equipo: la RPC lo lee de las membresías simuladas, así un cambio de rol se ve al recargar
   tables.memberships!.push({ user_id: "u-marta", project_id: PROJECT_ID, org_id: "org1", role: "field", company_id: null });

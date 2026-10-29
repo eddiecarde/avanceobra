@@ -1,6 +1,7 @@
 import { addDays } from "@avanceobra/engine";
 import { computeFormulas, FormDefinition, pruneHidden, validateAnswers, type Answers } from "@avanceobra/forms";
 import type { LossCause, Weather } from "@avanceobra/shared";
+import { lossesFromLegacy, summarizeLosses, type LossDraftLine } from "../../../core/losses";
 import { useQuery } from "@powersync/react";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
@@ -65,8 +66,10 @@ export default function Capture() {
   const [quantity, setQuantity] = useState("");
   const [more, setMore] = useState(false);
   const [hours, setHours] = useState<string | null>(null);
-  const [lostHours, setLostHours] = useState("0");
-  const [cause, setCause] = useState<LossCause>("none");
+  // Pérdidas de tiempo: varias líneas (2 h Clima, 1 h Material…)
+  const [losses, setLosses] = useState<LossDraftLine[]>([]);
+  const setLoss = (i: number, patch: Partial<LossDraftLine>) => setLosses((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
+  const lossSummary = summarizeLosses(losses);
   const [weather, setWeather] = useState<Weather | null>(null);
   const [crew, setCrew] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
@@ -143,8 +146,7 @@ export default function Capture() {
         setWorkDate(d.workDate || today);
         setQuantity(d.quantity);
         setHours(d.hours);
-        setLostHours(d.lostHours);
-        setCause(d.cause as LossCause);
+        setLosses(d.losses ?? lossesFromLegacy(d.lostHours, d.cause));
         setWeather(d.weather as Weather | null);
         setCrew(d.crew);
         setNotes(d.notes);
@@ -154,7 +156,7 @@ export default function Capture() {
         // Si se llegó escaneando un QR, se suma ese elemento a lo que ya traía el borrador.
         const current = planSelection.get();
         planSelection.restore(activityId, [...new Set([...d.elementIds, ...current.elementIds])], d.area ?? current.area);
-        if (d.lostHours !== "0" || d.notes || d.signatureUri) setMore(true);
+        if ((d.losses ?? lossesFromLegacy(d.lostHours, d.cause)).length || d.notes || d.signatureUri) setMore(true);
         const old = draftAgeHours(d) > DRAFT_STALE_HOURS;
         setRestoredLabel(`${old ? "⚠ Borrador antiguo" : "Borrador recuperado"} (${draftTimeLabel(d)})`);
       })
@@ -197,8 +199,9 @@ export default function Capture() {
       workDate,
       quantity,
       hours,
-      lostHours,
-      cause,
+      lostHours: String(lossSummary.total),
+      cause: lossSummary.main,
+      losses,
       weather,
       crew,
       notes,
@@ -224,8 +227,7 @@ export default function Capture() {
     setWorkDate(today);
     setQuantity("");
     setHours(null);
-    setLostHours("0");
-    setCause("none");
+    setLosses([]);
     setWeather(null);
     setCrew(null);
     setNotes("");
@@ -267,7 +269,8 @@ export default function Capture() {
         quantity: qty,
         effectiveHours: h,
         lostHours: lh,
-        lossCause: cause,
+        lossCause: lossSummary.main as LossCause,
+        losses: lossSummary.lines,
         weather: weather ?? (suggestion.weather as Weather | null),
         crewSize: Math.max(0, Math.round(num(crewSize) || 0)),
         notes,
@@ -302,9 +305,9 @@ export default function Capture() {
     if (!activity) return;
     if (!(q >= 0)) return Alert.alert("Cantidad inválida", "Escribe la cantidad ejecutada.");
     const h = num(effectiveHours);
-    const lh = num(lostHours);
-    if (!(h >= 0 && h <= 24) || !(lh >= 0 && lh <= 24)) return Alert.alert("Horas inválidas", "Deben estar entre 0 y 24.");
-    if (lh > 0 && cause === "none") return Alert.alert("Falta la causa", "Indica la causa de las horas perdidas.");
+    if (lossSummary.error) return Alert.alert("Revisa las pérdidas de tiempo", lossSummary.error);
+    const lh = lossSummary.total;
+    if (!(h >= 0 && h <= 24)) return Alert.alert("Horas inválidas", "Deben estar entre 0 y 24.");
 
     if (form && formCheck && !formCheck.ok) {
       setShowFormCheck(true);
@@ -421,10 +424,24 @@ export default function Capture() {
             <Input value={crewSize} onChangeText={setCrew} keyboardType="number-pad" />
             <Label>Clima</Label>
             <Chips options={WEATHER} value={weather ?? (suggestion.weather as Weather | null)} onChange={setWeather} />
-            <Label>Horas perdidas</Label>
-            <Input value={lostHours} onChangeText={setLostHours} keyboardType="decimal-pad" />
-            <Label>Causa de pérdida de tiempo</Label>
-            <Chips options={CAUSES} value={cause} onChange={setCause} />
+            <Label>{`Pérdidas de tiempo${lossSummary.total > 0 ? ` · ${lossSummary.total.toLocaleString("es-CO")} h` : ""}`}</Label>
+            {losses.map((l, i) => (
+              <Card key={i} accent={l.cause === "none" && l.hours.trim() !== "" && l.hours !== "0" ? t.danger : undefined}>
+                <Row style={{ justifyContent: "space-between" }}>
+                  <Input
+                    value={l.hours}
+                    onChangeText={(s) => setLoss(i, { hours: s })}
+                    keyboardType="decimal-pad"
+                    placeholder="Horas"
+                    accessibilityLabel={`Horas perdidas ${i + 1}`}
+                    style={{ width: 110 }}
+                  />
+                  <BigButton title="Quitar" onPress={() => setLosses((ls) => ls.filter((_, j) => j !== i))} />
+                </Row>
+                <Chips options={CAUSES.filter((c) => c.value !== "none")} value={l.cause === "none" ? null : (l.cause as LossCause)} onChange={(c) => setLoss(i, { cause: c })} />
+              </Card>
+            ))}
+            <BigButton title="+ Agregar pérdida" onPress={() => setLosses((ls) => [...ls, { hours: "", cause: "none" }])} />
             <Label>Observaciones</Label>
             <Input value={notes} onChangeText={setNotes} multiline style={{ minHeight: 100, textAlignVertical: "top" }} />
             <BigButton title={signatureUri ? "✓ Firmado (tocar para repetir)" : "✍ Firmar"} onPress={() => setSigning(true)} />

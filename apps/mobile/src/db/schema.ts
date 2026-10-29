@@ -18,7 +18,8 @@ const projects = new Table({
 });
 
 const memberships = new Table(
-  { user_id: column.text, project_id: column.text, role: column.text, member_name: column.text },
+  // ai_enabled: el administrador le activó el asistente con IA en esa obra (1 = sí)
+  { user_id: column.text, project_id: column.text, role: column.text, member_name: column.text, ai_enabled: column.integer },
   { indexes: { by_project: ["project_id"] } },
 );
 
@@ -94,6 +95,8 @@ const progress_entries = new Table(
     effective_hours: column.real,
     lost_hours: column.real,
     loss_cause: column.text,
+    // [{"cause":"weather","hours":2},{"cause":"material","hours":1}]
+    losses: column.text,
     weather: column.text,
     crew_size: column.integer,
     notes: column.text,

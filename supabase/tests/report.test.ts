@@ -96,7 +96,7 @@ describe("PDF", () => {
     const bytes = await buildReportPdf(buildDailyReport(raw(), DAY), new Date("2026-10-21T23:00:00Z"));
     expect(new TextDecoder().decode(bytes.slice(0, 5))).toBe("%PDF-");
     const doc = await PDFDocument.load(bytes);
-    expect(doc.getPageCount()).toBe(1);
+    expect(doc.getPageCount()).toBeGreaterThanOrEqual(2); // cuerpo + anexos
     expect(doc.getTitle()).toBe("Informe diario Parque Solar Demo 2026-10-21");
     const { width, height } = doc.getPage(0).getSize();
     expect([Math.round(width), Math.round(height)]).toEqual([595, 842]);

@@ -79,10 +79,32 @@ function isWorkingDay(d, cal = {}, holidays) {
 }
 function workingDaysBetween(from, to, cal = {}) {
   if (diffDays(from, to) < 0) return 0;
+  if (Object.keys(cal).length && diffDays(from, to) > 31) {
+    let c = tables.get(cal);
+    if (!c || from < c.from || to > c.to) {
+      const lo = c && c.from < from ? c.from : addDays(from, -366);
+      const hi = c && c.to > to ? c.to : addDays(to, 366);
+      c = { from: lo, to: hi, count: countTable(cal, lo, hi) };
+      tables.set(cal, c);
+    }
+    return c.count(from, to);
+  }
+  return countLoop(from, to, cal);
+}
+function countLoop(from, to, cal) {
   const set = buildHolidaySet(cal, parseDate(from).getUTCFullYear(), parseDate(to).getUTCFullYear());
   let n = 0;
   for (let d = from; diffDays(d, to) >= 0; d = addDays(d, 1)) if (isWorkingDay(d, cal, set)) n++;
   return n;
+}
+var tables = /* @__PURE__ */ new WeakMap();
+function countTable(cal, from, to) {
+  const n = diffDays(from, to) + 1;
+  const set = buildHolidaySet(cal, parseDate(from).getUTCFullYear(), parseDate(to).getUTCFullYear());
+  const cum = new Int32Array(n + 1);
+  let d = from;
+  for (let i = 0; i < n; i++, d = addDays(d, 1)) cum[i + 1] = cum[i] + (isWorkingDay(d, cal, set) ? 1 : 0);
+  return (a, b) => cum[diffDays(from, b) + 1] - cum[diffDays(from, a)];
 }
 function workdayCounter(cal, from, to) {
   const n = Math.max(0, diffDays(from, to) + 1);
@@ -448,6 +470,11 @@ function pareto(items, threshold = 0.8) {
     if (cum / grand >= threshold - 1e-9) reached = true;
     return { key, value, pct: value / grand, cumulativePct: cum / grand, vital };
   });
+}
+function entryLossLines(e) {
+  const lines = (e.losses ?? []).filter((l) => l && l.cause && l.cause !== "none" && Number(l.hours) > 0).map((l) => ({ cause: l.cause, hours: Number(l.hours) }));
+  if (lines.length) return lines;
+  return e.lossCause && e.lossCause !== "none" && Number(e.lostHours) > 0 ? [{ cause: e.lossCause, hours: Number(e.lostHours) }] : [];
 }
 function lossPareto(records, metric, threshold = 0.8) {
   const value = (r) => {
@@ -1131,6 +1158,17 @@ function summarizeDailyLogs(logs) {
   }
   return out;
 }
+function equipmentUnitsByActivity(logs) {
+  const out = /* @__PURE__ */ new Map();
+  for (const l of logs)
+    for (const e of l.equipment ?? []) {
+      if (!e.activity_id || !(Number(e.qty) > 0)) continue;
+      const byDate = out.get(e.activity_id) ?? /* @__PURE__ */ new Map();
+      byDate.set(l.date, (byDate.get(l.date) ?? 0) + Number(e.qty));
+      out.set(e.activity_id, byDate);
+    }
+  return out;
+}
 function rainInWindow(intervals, window) {
   const [ws, we] = [toMin(window.start), toMin(window.end)];
   return mergeRain(intervals).intervals.reduce((s, i) => s + Math.max(0, Math.min(we, toMin(i.end)) - Math.max(ws, toMin(i.start))), 0);
@@ -1794,6 +1832,666 @@ function contractSettlement(input) {
     totalPaid: money2(paidNet + balance + input.advanceGiven)
   };
 }
+
+// packages/engine/src/report.ts
+var REPORT_STATUS_LABEL = {
+  atrasada: "Atrasada",
+  sin_avance: "Sin avance reciente",
+  sin_registros: "Sin registros",
+  en_riesgo: "En riesgo",
+  al_dia: "Al d\xEDa",
+  terminada: "Terminada",
+  por_iniciar: "Por iniciar",
+  sin_programa: "Sin fecha programada"
+};
+var REPORT_STATUS_ORDER = ["atrasada", "sin_avance", "sin_registros", "en_riesgo", "al_dia", "por_iniciar", "sin_programa", "terminada"];
+function reportStatusRules(th = DEFAULT_THRESHOLDS, windowDays = 14) {
+  return {
+    atrasada: `Con fechas programadas y (${th.redGapPts} puntos o m\xE1s por debajo de lo programado, o terminar\xEDa m\xE1s de ${th.redDelayDays} d\xEDas despu\xE9s de su fin planeado al ritmo actual).`,
+    sin_avance: `Ya tuvo avance, le falta cantidad y no registra producci\xF3n en los \xFAltimos ${windowDays} d\xEDas; a\xFAn no cumple el criterio de atrasada.`,
+    sin_registros: "Su inicio programado ya pas\xF3 y no tiene ning\xFAn registro de avance; a\xFAn no cumple el criterio de atrasada.",
+    en_riesgo: `Entre ${th.amberGapPts} y ${th.redGapPts} puntos por debajo de lo programado, o terminar\xEDa hasta ${th.redDelayDays} d\xEDas tarde al ritmo actual.`,
+    al_dia: "Avanza al ritmo necesario para terminar en su fecha planeada.",
+    terminada: "Cantidad ejecutada igual o mayor a la contractual.",
+    por_iniciar: "Su inicio programado es posterior a la fecha de corte.",
+    sin_programa: "No tiene fecha de inicio o de fin programada: no se eval\xFAa atraso."
+  };
+}
+var fmt2 = (n) => n.toLocaleString("es-CO", { maximumFractionDigits: 1 });
+var fmtPct = (x) => `${(x * 100).toLocaleString("es-CO", { maximumFractionDigits: 1 })} %`;
+var dmy = (d) => d ? d.split("-").reverse().join("/") : "\u2014";
+var fmtPts = (pts) => `${pts > 0 ? "+" : ""}${pts.toLocaleString("es-CO", { maximumFractionDigits: 1 })} pts`;
+function indexEntries(entries) {
+  const by = /* @__PURE__ */ new Map();
+  const sorted = [...entries].sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+  for (const e of sorted) {
+    let x = by.get(e.activityId);
+    if (!x) by.set(e.activityId, x = { dates: [], cum: [] });
+    x.dates.push(e.date);
+    x.cum.push((x.cum.at(-1) ?? 0) + e.quantity);
+  }
+  const upto = (x, d) => {
+    let lo = 0;
+    let hi = x.dates.length - 1;
+    let ans = -1;
+    while (lo <= hi) {
+      const mid = lo + hi >> 1;
+      if (x.dates[mid] <= d) {
+        ans = mid;
+        lo = mid + 1;
+      } else hi = mid - 1;
+    }
+    return ans;
+  };
+  return {
+    sumUntil(id, d) {
+      const x = by.get(id);
+      if (!x) return 0;
+      const i = upto(x, d);
+      return i < 0 ? 0 : x.cum[i];
+    },
+    lastDate(id, d) {
+      const x = by.get(id);
+      if (!x) return null;
+      const i = upto(x, d);
+      return i < 0 ? null : x.dates[i];
+    }
+  };
+}
+function classify(st, executedRaw, stalled, th) {
+  if (st.light === "done") return "terminada";
+  if (st.light === "no_plan") return "sin_programa";
+  if (st.light === "not_started") return "por_iniciar";
+  const confirmedLate = st.gapPts <= -th.redGapPts || (st.delayDays ?? 0) > th.redDelayDays || st.requiredRate === Infinity;
+  if (executedRaw <= 0) return confirmedLate ? "atrasada" : "sin_registros";
+  if (stalled) return confirmedLate ? "atrasada" : "sin_avance";
+  if (st.light === "red") return confirmedLate ? "atrasada" : "en_riesgo";
+  if (st.light === "amber") return "en_riesgo";
+  return "al_dia";
+}
+function actionFor(r) {
+  const u = r.unit;
+  switch (r.status) {
+    case "atrasada":
+      if (r.requiredRate === Infinity) return `Su fin planeado (${dmy(r.plannedFinish)}) ya pas\xF3: reprogramar y asignar recursos para los ${fmt2(r.pendingQty)} ${u} pendientes.`;
+      if (r.requiredRate != null && r.dailyRate > 0)
+        return `Subir el ritmo de ${fmt2(r.dailyRate)} a ${fmt2(r.requiredRate)} ${u}/d\xEDa (\xD7${fmt2(r.requiredRate / r.dailyRate)}) o reprogramar su fin (${dmy(r.plannedFinish)}).`;
+      if (r.executedQty <= 0) return `Programada desde el ${dmy(r.plannedStart)} sin ning\xFAn registro: confirmar si inici\xF3 y actualizar el reporte, o reprogramarla.`;
+      return `Sin producci\xF3n reciente (\xFAltimo registro ${r.lastUpdate ?? "\u2014"}): identificar y registrar la causa, y definir fecha de reinicio.`;
+    case "sin_avance":
+      return `Sin producci\xF3n desde el ${dmy(r.lastUpdate)}: confirmar si est\xE1 detenida y registrar la causa.`;
+    case "sin_registros":
+      return `Inici\xF3 el ${dmy(r.plannedStart)} seg\xFAn el programa y no tiene registros: confirmar si arranc\xF3 y actualizar el reporte.`;
+    case "en_riesgo":
+      return r.requiredRate != null && Number.isFinite(r.requiredRate) && r.requiredRate > r.dailyRate ? `Vigilar el ritmo: necesita ${fmt2(r.requiredRate)} ${u}/d\xEDa y lleva ${fmt2(r.dailyRate)}.` : "Vigilar: va por debajo de lo programado.";
+    default:
+      return null;
+  }
+}
+function reportSnapshot(input, date, periodFrom = date, idx = indexEntries(input.entries)) {
+  const th = input.thresholds ?? DEFAULT_THRESHOLDS;
+  const win = input.windowDays ?? 14;
+  const cal = input.calendar;
+  const windowFrom = addDays(date, -win);
+  const rateDays = workingDaysBetween(addDays(date, -(win - 1)), date, cal);
+  const rows = input.activities.map((a) => {
+    const executedRaw = idx.sumUntil(a.id, date);
+    const recent = executedRaw - idx.sumUntil(a.id, windowFrom);
+    const rate = rateDays > 0 ? recent / rateDays : 0;
+    const st = activityStatus(a, executedRaw, rate, date, cal, th);
+    const pending = Math.max(0, a.contractQty - executedRaw);
+    const stalled = pending > 1e-9 && executedRaw > 0 && recent <= 0;
+    const status = classify(st, executedRaw, stalled, th);
+    const base = {
+      id: a.id,
+      code: a.code,
+      name: a.name,
+      unit: a.unit,
+      front: a.front,
+      frontName: a.frontName,
+      group: a.group,
+      responsible: a.responsible,
+      plannedStart: a.plannedStart,
+      plannedFinish: a.plannedFinish,
+      contractQty: a.contractQty,
+      executedQty: executedRaw,
+      pendingQty: pending,
+      periodQty: executedRaw - idx.sumUntil(a.id, addDays(periodFrom, -1)),
+      actualPct: st.actualPct,
+      plannedPct: st.plannedPct,
+      gapPts: st.gapPts,
+      dailyRate: st.dailyRate,
+      requiredRate: st.requiredRate,
+      projectedFinish: st.projectedFinish,
+      delayDays: st.delayDays,
+      lastUpdate: idx.lastDate(a.id, date),
+      status,
+      light: st.light,
+      stalled,
+      reason: st.reason
+    };
+    return { ...base, action: actionFor(base) };
+  });
+  const { acts, w } = weighting(input.activities);
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const actual = acts.reduce((s, a) => s + w(a) * Math.min(1, byId.get(a.id).executedQty / a.contractQty), 0);
+  const planned = acts.reduce((s, a) => s + w(a) * (plannedQtyAt(a, date, cal) / a.contractQty), 0);
+  const counts = Object.fromEntries(REPORT_STATUS_ORDER.map((s) => [s, 0]));
+  rows.forEach((r) => counts[r.status]++);
+  return { date, rows, actual, planned, counts };
+}
+var PRIORITY = ["atrasada", "sin_avance", "sin_registros", "en_riesgo"];
+function priorityRows(rows) {
+  return rows.filter((r) => PRIORITY.includes(r.status)).sort((a, b) => PRIORITY.indexOf(a.status) - PRIORITY.indexOf(b.status) || a.gapPts - b.gapPts || b.pendingQty / (b.contractQty || 1) - a.pendingQty / (a.contractQty || 1));
+}
+function dataObservations(input, cutoff, snap) {
+  const out = [];
+  const { excluded, weighted } = weighting(input.activities);
+  const noDates = input.activities.filter((a) => !a.plannedStart || !a.plannedFinish);
+  const noQty = input.activities.filter((a) => !(a.contractQty > 0));
+  if (noDates.length)
+    out.push({
+      kind: "dato",
+      text: `${noDates.length} actividad(es) sin fecha de inicio o fin programada (${noDates.slice(0, 5).map((a) => a.code).join(", ")}${noDates.length > 5 ? "\u2026" : ""}): no entran al avance global ni se eval\xFAa su atraso.`
+    });
+  if (noQty.length)
+    out.push({
+      kind: "dato",
+      text: `${noQty.length} actividad(es) con cantidad contractual 0: no entran al avance global.`
+    });
+  const swapped = input.activities.filter((a) => a.plannedStart && a.plannedFinish && a.plannedFinish < a.plannedStart);
+  if (swapped.length)
+    out.push({
+      kind: "dato",
+      text: `${swapped.length} actividad(es) con fin programado anterior al inicio: revisar el programa (${swapped.slice(0, 5).map((a) => a.code).join(", ")}).`
+    });
+  const over = snap.rows.filter((r) => r.contractQty > 0 && r.executedQty > r.contractQty * 1.0001);
+  if (over.length)
+    out.push({
+      kind: "dato",
+      text: `${over.length} actividad(es) con ejecutado mayor que la cantidad contractual (${over.slice(0, 4).map((r) => `${r.code}: ${fmt2(r.executedQty)} de ${fmt2(r.contractQty)} ${r.unit}`).join("; ")}${over.length > 4 ? "\u2026" : ""}). El avance se limita al 100 %; revisar la cantidad contractual o los registros.`
+    });
+  const future = input.entries.filter((e) => e.date > cutoff).length;
+  if (future)
+    out.push({
+      kind: "criterio",
+      text: `${future} registro(s) con fecha posterior al corte no se incluyen.`
+    });
+  const orphan = input.entries.filter((e) => !input.activities.some((a) => a.id === e.activityId)).length;
+  if (orphan)
+    out.push({
+      kind: "dato",
+      text: `${orphan} registro(s) de avance de actividades que ya no existen en el programa no se cuentan.`
+    });
+  const negative = input.entries.filter((e) => e.quantity < 0).length;
+  if (negative)
+    out.push({
+      kind: "dato",
+      text: `${negative} registro(s) con cantidad negativa (ajustes) restan del acumulado.`
+    });
+  if (weighted) {
+    const zero = input.activities.filter((a) => a.weight == null && a.contractQty > 0 && a.plannedStart && a.plannedFinish).length;
+    if (zero)
+      out.push({
+        kind: "criterio",
+        text: `Avance ponderado por peso: ${zero} actividad(es) sin peso asignado pesan 0 en el avance global.`
+      });
+  } else if (input.activities.length - excluded.length > 1)
+    out.push({
+      kind: "criterio",
+      text: "Ninguna actividad tiene peso: todas pesan igual en el avance global."
+    });
+  if (!input.project.contractEnd)
+    out.push({
+      kind: "dato",
+      text: "El proyecto no tiene fecha contractual: no se calcula el atraso frente al contrato."
+    });
+  return out;
+}
+var DEFAULT_LABELS = { loss: {} };
+var SEVERITY_RANK = {
+  critical: 0,
+  high: 1,
+  medium: 2,
+  low: 3
+};
+var TONE_RANK = {
+  critical: 0,
+  warning: 1,
+  info: 2,
+  good: 3
+};
+function gainOf(input) {
+  const { acts, w } = weighting(input.activities);
+  const m = new Map(acts.map((a) => [a.id, w(a) / a.contractQty]));
+  return (activityId, qty) => (m.get(activityId) ?? 0) * qty * 100;
+}
+function productionBy(input, list) {
+  const actById = new Map(input.activities.map((a) => [a.id, a]));
+  const grouped = input.activities.some((a) => a.group);
+  const gain = gainOf(input);
+  const m = /* @__PURE__ */ new Map();
+  for (const e of list) {
+    const a = actById.get(e.activityId);
+    if (!a) continue;
+    const key = (grouped ? a.group : a.front) ?? a.front ?? "\u2014";
+    const label = grouped ? a.group ?? key : a.frontName ? `${a.front} \xB7 ${a.frontName}` : key;
+    const x = m.get(key) ?? {
+      label,
+      acts: /* @__PURE__ */ new Set(),
+      units: /* @__PURE__ */ new Map(),
+      gain: 0
+    };
+    x.acts.add(a.id);
+    x.units.set(a.unit, (x.units.get(a.unit) ?? 0) + e.quantity);
+    x.gain += gain(a.id, e.quantity);
+    m.set(key, x);
+  }
+  return [...m.entries()].map(([key, x]) => ({
+    key,
+    label: x.label,
+    activities: x.acts.size,
+    qtyByUnit: [...x.units.entries()].map(([unit, qty]) => ({ unit, qty })).sort((a, b) => b.qty - a.qty),
+    gainPts: x.gain
+  })).sort((a, b) => b.gainPts - a.gainPts || b.activities - a.activities);
+}
+function openFindingsAt(findings, d) {
+  return findings.filter((f) => f.createdAt <= d && (!f.closedAt || f.closedAt > d) && !(f.status === "closed" && !f.closedAt)).map((f) => ({ ...f, overdue: f.dueDate != null && f.dueDate < d })).sort((a, b) => (SEVERITY_RANK[a.severity] ?? 9) - (SEVERITY_RANK[b.severity] ?? 9) || Number(b.overdue) - Number(a.overdue));
+}
+function buildDailyAnalysis(input, day, labels = DEFAULT_LABELS) {
+  const cal = input.calendar;
+  const upTo = input.entries.filter((e) => e.date <= day);
+  const idx = indexEntries(upTo);
+  const starts = input.activities.map((a2) => a2.plannedStart).filter(Boolean);
+  const from = input.project.startDate ?? starts.sort()[0] ?? day;
+  const to = input.project.contractEnd ?? day;
+  const curve = sCurve({
+    activities: input.activities,
+    daily: upTo.map((e) => ({
+      activityId: e.activityId,
+      date: e.date,
+      quantity: e.quantity
+    })),
+    from: from > day ? day : from,
+    to: to < day ? day : to,
+    today: day,
+    calendar: cal,
+    rateWindowDays: input.windowDays
+  });
+  const snapshot = reportSnapshot({ ...input, entries: upTo }, day, day, idx);
+  const priority = priorityRows(snapshot.rows);
+  const todays = upTo.filter((e) => e.date === day);
+  const weatherCount = /* @__PURE__ */ new Map();
+  todays.forEach((e) => e.weather && weatherCount.set(e.weather, (weatherCount.get(e.weather) ?? 0) + 1));
+  const losses = /* @__PURE__ */ new Map();
+  todays.flatMap(entryLossLines).forEach((l) => losses.set(l.cause, (losses.get(l.cause) ?? 0) + l.hours));
+  const weekCauses = lossPareto(
+    upTo.filter((e) => e.date >= addDays(day, -6)).flatMap(entryLossLines).map((l) => ({ cause: l.cause, lostHours: l.hours })),
+    "lost_hours"
+  ).slice(0, 3).map((r) => ({ cause: r.key, hours: r.value, pct: r.pct }));
+  const open = openFindingsAt(input.findings, day);
+  const code = new Map(input.activities.map((a2) => [a2.id, a2.code]));
+  const finishDelay = curve.projectedFinish && input.project.contractEnd ? diffDays(input.project.contractEnd, curve.projectedFinish) : null;
+  const deviationPts = (curve.actualToday - curve.plannedToday) * 100;
+  const a = {
+    day,
+    workday: isWorkingDay(day, cal),
+    curve,
+    actual: curve.actualToday,
+    planned: curve.plannedToday,
+    deviationPts,
+    spi: curve.spi,
+    contractEnd: input.project.contractEnd,
+    projectedFinish: curve.projectedFinish,
+    finishDelay,
+    stalledCodes: curve.stalled.map((id) => code.get(id) ?? "?"),
+    snapshot,
+    priority,
+    production: productionBy(input, todays),
+    entries: todays.length,
+    crew: todays.reduce((s, e) => s + e.crew, 0),
+    effectiveHours: todays.reduce((s, e) => s + e.effectiveHours, 0),
+    lostHours: [...losses.values()].reduce((s, h) => s + h, 0),
+    weather: [...weatherCount.entries()].sort((x, y) => y[1] - x[1])[0]?.[0] ?? null,
+    lossesToday: [...losses.entries()].map(([cause, hours]) => ({ cause, hours })).sort((x, y) => y.hours - x.hours),
+    weekCauses,
+    findings: {
+      opened: input.findings.filter((f) => f.createdAt === day),
+      closed: input.findings.filter((f) => f.closedAt === day),
+      open,
+      overdue: open.filter((f) => f.overdue).length,
+      impeditive: open.filter((f) => f.impeditive).length,
+      criticalHigh: open.filter((f) => f.severity === "critical" || f.severity === "high").length
+    },
+    notes: todays.filter((e) => e.notes?.trim()).map((e) => ({
+      code: code.get(e.activityId) ?? "?",
+      text: e.notes.trim()
+    })),
+    situations: [],
+    observations: dataObservations(input, day, snapshot)
+  };
+  a.situations = dailySituations(a, labels);
+  return a;
+}
+function dailySituations(a, labels) {
+  const s = [];
+  const late = a.snapshot.counts.atrasada;
+  if (a.finishDelay != null && a.finishDelay > 0)
+    s.push({
+      tone: "critical",
+      title: `La terminaci\xF3n proyectada supera la fecha contractual en ${a.finishDelay} d\xEDas`,
+      evidence: `Fin proyectado ${dmy(a.projectedFinish)} frente a ${dmy(a.contractEnd)} (al ritmo de los \xFAltimos 14 d\xEDas).`,
+      action: "Revisar el plan de recuperaci\xF3n de las actividades cr\xEDticas atrasadas o evaluar escenarios en el simulador."
+    });
+  else if (!a.projectedFinish && a.stalledCodes.length)
+    s.push({
+      tone: "warning",
+      title: "No se puede proyectar la terminaci\xF3n",
+      evidence: `${a.stalledCodes.length} actividad(es) con saldo no registran producci\xF3n reciente (${a.stalledCodes.slice(0, 4).join(", ")}${a.stalledCodes.length > 4 ? "\u2026" : ""}).`,
+      action: "Confirmar si est\xE1n detenidas y registrar la causa o la fecha de reinicio."
+    });
+  if (a.planned > 0 && a.deviationPts <= -5)
+    s.push({
+      tone: a.deviationPts <= -15 ? "critical" : "warning",
+      title: `Avance global ${fmt2(-a.deviationPts)} puntos por debajo del programa`,
+      evidence: `Real ${fmtPct(a.actual)} frente a ${fmtPct(a.planned)} programado${a.spi != null ? ` (SPI ${a.spi.toLocaleString("es-CO", { maximumFractionDigits: 2 })})` : ""}.`,
+      action: late ? `Priorizar las ${late} actividad(es) atrasadas de la tabla de prioridades.` : null
+    });
+  const top = a.priority.find((r) => r.status === "atrasada");
+  if (top)
+    s.push({
+      tone: "critical",
+      title: `${top.code} \xB7 ${top.name}: ${fmtPts(top.gapPts)} frente a lo programado`,
+      evidence: `${fmtPct(top.actualPct)} ejecutado de ${fmtPct(top.plannedPct)} programado; faltan ${fmt2(top.pendingQty)} ${top.unit}.`,
+      action: top.action
+    });
+  if (a.workday && a.entries === 0)
+    s.push({
+      tone: "warning",
+      title: "D\xEDa laborable sin registros de avance",
+      evidence: "No hay registros enviados o aprobados con esta fecha.",
+      action: "Confirmar con los supervisores si hubo trabajo y que los tel\xE9fonos sincronizaron."
+    });
+  if (a.findings.overdue || a.findings.impeditive)
+    s.push({
+      tone: a.findings.impeditive ? "critical" : "warning",
+      title: `${a.findings.open.length} hallazgo(s) abierto(s): ${a.findings.overdue} vencido(s)${a.findings.impeditive ? `, ${a.findings.impeditive} impeditivo(s)` : ""}`,
+      evidence: a.findings.open[0] ? `El m\xE1s grave: ${a.findings.open[0].description}${a.findings.open[0].dueDate ? ` (l\xEDmite ${dmy(a.findings.open[0].dueDate)})` : ""}.` : "",
+      action: "Cerrar o reprogramar los hallazgos vencidos con su responsable."
+    });
+  if (a.lostHours > 0) {
+    const c = a.lossesToday[0];
+    s.push({
+      tone: "info",
+      title: `${fmt2(a.lostHours)} h perdidas en el d\xEDa`,
+      evidence: `Causa principal registrada: ${labels.loss[c.cause] ?? c.cause} (${fmt2(c.hours)} h).`,
+      action: null
+    });
+  }
+  const sinAvance = a.snapshot.counts.sin_avance + a.snapshot.counts.sin_registros;
+  if (sinAvance)
+    s.push({
+      tone: "warning",
+      title: `${sinAvance} actividad(es) iniciadas sin producci\xF3n reciente`,
+      evidence: `${a.snapshot.counts.sin_avance} sin avance en 14 d\xEDas y ${a.snapshot.counts.sin_registros} sin ning\xFAn registro desde su inicio programado.`,
+      action: "Actualizar su estado o registrar la causa de la detenci\xF3n."
+    });
+  if (!s.length && a.entries > 0)
+    s.push({
+      tone: "good",
+      title: "Obra seg\xFAn el programa",
+      evidence: `Real ${fmtPct(a.actual)} frente a ${fmtPct(a.planned)} programado.`,
+      action: null
+    });
+  return s.sort((x, y) => TONE_RANK[x.tone] - TONE_RANK[y.tone]).slice(0, 5);
+}
+function buildWeeklyAnalysis(input, weekStart, today, opts = {}) {
+  const cal = input.calendar;
+  const labels = opts.labels ?? DEFAULT_LABELS;
+  const weekEnd = addDays(weekStart, 6);
+  const cutoff = weekEnd < today ? weekEnd : today < weekStart ? weekStart : today;
+  const prevEnd = addDays(weekStart, -1);
+  const prevStart = addDays(weekStart, -7);
+  const upTo = input.entries.filter((e) => e.date <= cutoff);
+  const idx = indexEntries(upTo);
+  const inp = { ...input, entries: upTo };
+  const starts = input.activities.map((a) => a.plannedStart).filter(Boolean);
+  const from0 = input.project.startDate ?? starts.sort()[0] ?? weekStart;
+  const from = from0 > cutoff ? cutoff : from0;
+  const to = input.project.contractEnd ?? cutoff;
+  const grouped = input.activities.some((a) => a.group);
+  const groupOf = grouped ? {
+    groupOf: (id) => input.activities.find((a) => a.id === id)?.group ?? null,
+    rateWindowDays: 21
+  } : {};
+  const daily = upTo.map((e) => ({
+    activityId: e.activityId,
+    date: e.date,
+    quantity: e.quantity
+  }));
+  const curve = sCurve({
+    activities: input.activities,
+    daily,
+    from,
+    to: to < cutoff ? cutoff : to,
+    today: cutoff,
+    calendar: cal,
+    ...groupOf
+  });
+  const prevCurve = prevEnd >= from ? sCurve({
+    activities: input.activities,
+    daily: daily.filter((d) => d.date <= prevEnd),
+    from,
+    to: to < prevEnd ? prevEnd : to,
+    today: prevEnd,
+    calendar: cal,
+    ...groupOf
+  }) : null;
+  const start = reportSnapshot(inp, prevEnd, prevStart, idx);
+  const end = reportSnapshot(inp, cutoff, weekStart, idx);
+  const startById = new Map(start.rows.map((r) => [r.id, r]));
+  const inWeek = upTo.filter((e) => e.date >= weekStart && e.date <= cutoff);
+  const prevWeek = input.entries.filter((e) => e.date >= prevStart && e.date <= prevEnd);
+  const gain = gainOf(input);
+  const actById = new Map(input.activities.map((a) => [a.id, a]));
+  const keyOf = (id) => {
+    const a = actById.get(id);
+    return a ? (grouped ? a.group : a.front) ?? a.front ?? "\u2014" : "\u2014";
+  };
+  const { acts, w } = weighting(input.activities);
+  const actualAt = (d) => acts.reduce((s, a) => s + w(a) * Math.min(1, idx.sumUntil(a.id, d) / a.contractQty), 0);
+  const plannedAt = (d) => acts.reduce((s, a) => s + w(a) * (plannedQtyAt(a, d, cal) / a.contractQty), 0);
+  const days2 = Array.from({ length: 7 }, (_, i) => {
+    const date = addDays(weekStart, i);
+    const es = inWeek.filter((e) => e.date === date);
+    const gainBy = {};
+    for (const e of es) gainBy[keyOf(e.activityId)] = (gainBy[keyOf(e.activityId)] ?? 0) + gain(e.activityId, e.quantity);
+    const past = date <= cutoff;
+    return {
+      date,
+      workday: isWorkingDay(date, cal),
+      actual: past ? actualAt(date) : NaN,
+      planned: plannedAt(date),
+      gainPts: past ? (actualAt(date) - actualAt(addDays(date, -1))) * 100 : NaN,
+      gainBy,
+      entries: es.length,
+      crew: es.reduce((s, e) => s + e.crew, 0),
+      lostHours: es.flatMap(entryLossLines).reduce((s, l) => s + l.hours, 0)
+    };
+  });
+  const production = productionBy(input, inWeek);
+  const groups = production.map((p) => ({ key: p.key, label: p.label }));
+  const weekWorkdays = Math.max(1, workingDaysBetween(weekStart, cutoff, cal));
+  const rateVsRequired = end.rows.filter((r) => r.requiredRate != null && Number.isFinite(r.requiredRate) && r.requiredRate > 0 && r.status !== "terminada" && (r.periodQty > 0 || r.status === "atrasada")).map((r) => {
+    const weekRate = r.periodQty / weekWorkdays;
+    return {
+      code: r.code,
+      name: r.name,
+      unit: r.unit,
+      weekRate,
+      requiredRate: r.requiredRate,
+      ratio: weekRate / r.requiredRate
+    };
+  }).sort((a, b) => a.ratio - b.ratio).slice(0, 12);
+  const causesByAct = /* @__PURE__ */ new Map();
+  for (const e of inWeek)
+    for (const l of entryLossLines(e)) {
+      const m = causesByAct.get(e.activityId) ?? /* @__PURE__ */ new Map();
+      m.set(l.cause, (m.get(l.cause) ?? 0) + l.hours);
+      causesByAct.set(e.activityId, m);
+    }
+  const priority = priorityRows(end.rows);
+  const deviations = priority.slice(0, 15).map((row) => {
+    const prev = startById.get(row.id);
+    const prevApplies = prev && !["por_iniciar", "sin_programa"].includes(prev.status);
+    const prevGapPts = prevApplies ? prev.gapPts : null;
+    const trend2 = prevGapPts == null ? "nueva" : row.gapPts > prevGapPts + 0.5 ? "mejora" : row.gapPts < prevGapPts - 0.5 ? "empeora" : "igual";
+    const causes2 = [...(causesByAct.get(row.id) ?? /* @__PURE__ */ new Map()).entries()].map(([cause, hours]) => ({ cause, hours })).sort((a, b) => b.hours - a.hours);
+    return {
+      row,
+      prevGapPts,
+      trend: trend2,
+      causes: causes2,
+      weekRate: row.periodQty / weekWorkdays
+    };
+  });
+  const nWeeks = opts.trendWeeks ?? 8;
+  const trend = [];
+  for (let k = nWeeks - 1; k >= 0; k--) {
+    const ws = addDays(weekStart, -7 * k);
+    const we = k === 0 ? cutoff : addDays(ws, 6);
+    if (we < from) continue;
+    const snap = k === 0 ? end : reportSnapshot(inp, we, ws, idx);
+    const prevA = actualAt(addDays(ws, -1));
+    const open = openFindingsAt(input.findings, we);
+    trend.push({
+      weekStart: ws,
+      weekEnd: we,
+      actual: snap.actual,
+      planned: snap.planned,
+      gainPts: (snap.actual - prevA) * 100,
+      late: snap.counts.atrasada,
+      pending: snap.rows.filter((r) => r.status !== "terminada").length,
+      attention: snap.counts.atrasada + snap.counts.sin_avance + snap.counts.sin_registros + snap.counts.en_riesgo,
+      findingsOpened: input.findings.filter((f) => f.createdAt >= ws && f.createdAt <= we).length,
+      findingsClosed: input.findings.filter((f) => f.closedAt != null && f.closedAt >= ws && f.closedAt <= we).length,
+      findingsOpen: open.length
+    });
+  }
+  const causes = lossPareto(
+    inWeek.flatMap(entryLossLines).map((l) => ({ cause: l.cause, lostHours: l.hours })),
+    "lost_hours"
+  ).slice(0, 4).map((r) => ({ cause: r.key, hours: r.value, pct: r.pct }));
+  const openEnd = openFindingsAt(input.findings, cutoff);
+  const actualStart = start.actual;
+  const prevPrevActual = actualAt(addDays(prevStart, -1));
+  const finishDelay = curve.projectedFinish && input.project.contractEnd ? diffDays(input.project.contractEnd, curve.projectedFinish) : null;
+  const w2 = {
+    weekStart,
+    weekEnd,
+    cutoff,
+    inProgress: cutoff < weekEnd,
+    actualStart,
+    actualEnd: end.actual,
+    plannedStart: start.planned,
+    plannedEnd: end.planned,
+    deviationStartPts: (start.actual - start.planned) * 100,
+    deviationEndPts: (end.actual - end.planned) * 100,
+    gainPts: (end.actual - actualStart) * 100,
+    plannedGainPts: (end.planned - start.planned) * 100,
+    prevGainPts: prevEnd >= from ? (actualStart - prevPrevActual) * 100 : null,
+    spi: end.planned > 0 ? end.actual / end.planned : null,
+    contractEnd: input.project.contractEnd,
+    projectedFinish: curve.projectedFinish,
+    finishDelay,
+    prevProjectedFinish: prevCurve?.projectedFinish ?? null,
+    curve,
+    start,
+    end,
+    completed: end.rows.filter((r) => r.status === "terminada" && startById.get(r.id)?.status !== "terminada"),
+    priority,
+    days: days2,
+    groups,
+    production,
+    rateVsRequired,
+    deviations,
+    trend,
+    entries: inWeek.length,
+    prevEntries: prevWeek.length,
+    crewDays: inWeek.reduce((s, e) => s + e.crew, 0),
+    lostHours: inWeek.flatMap(entryLossLines).reduce((s, l) => s + l.hours, 0),
+    prevLostHours: prevWeek.flatMap(entryLossLines).reduce((s, l) => s + l.hours, 0),
+    causes,
+    findings: {
+      opened: input.findings.filter((f) => f.createdAt >= weekStart && f.createdAt <= cutoff).length,
+      closed: input.findings.filter((f) => f.closedAt != null && f.closedAt >= weekStart && f.closedAt <= cutoff).length,
+      open: openEnd.length,
+      overdue: openEnd.filter((f) => f.overdue).length,
+      impeditive: openEnd.filter((f) => f.impeditive).length,
+      prevOpened: input.findings.filter((f) => f.createdAt >= prevStart && f.createdAt <= prevEnd).length,
+      prevClosed: input.findings.filter((f) => f.closedAt != null && f.closedAt >= prevStart && f.closedAt <= prevEnd).length
+    },
+    situations: [],
+    observations: dataObservations(input, cutoff, end)
+  };
+  w2.situations = weeklySituations(w2, labels);
+  return w2;
+}
+function weeklySituations(w, labels) {
+  const s = [];
+  if (w.finishDelay != null && w.finishDelay > 0)
+    s.push({
+      tone: "critical",
+      title: `Terminaci\xF3n proyectada ${w.finishDelay} d\xEDas despu\xE9s de la fecha contractual`,
+      evidence: `Fin proyectado ${dmy(w.projectedFinish)} frente a ${dmy(w.contractEnd)}${w.prevProjectedFinish ? ` (la semana anterior: ${dmy(w.prevProjectedFinish)})` : ""}.`,
+      action: "Definir el plan de recuperaci\xF3n con las actividades de mayor desviaci\xF3n o evaluar escenarios en el simulador."
+    });
+  const dDev = w.deviationEndPts - w.deviationStartPts;
+  if (w.plannedEnd > 0 && w.deviationEndPts <= -5)
+    s.push({
+      tone: w.deviationEndPts <= -15 ? "critical" : "warning",
+      title: `Desviaci\xF3n de ${fmtPts(w.deviationEndPts)} al cierre (${dDev < -0.05 ? "empeor\xF3" : dDev > 0.05 ? "mejor\xF3" : "sin cambio"} ${fmt2(Math.abs(dDev))} pts en la semana)`,
+      evidence: `Avanz\xF3 ${fmt2(w.gainPts)} pts frente a ${fmt2(w.plannedGainPts)} pts programados en la semana.`,
+      action: dDev < 0 ? "La producci\xF3n no alcanza el ritmo programado: reforzar las actividades de la tabla de desviaciones." : null
+    });
+  if (w.prevGainPts != null && w.prevGainPts > 0 && w.gainPts < w.prevGainPts * 0.8)
+    s.push({
+      tone: "warning",
+      title: `La producci\xF3n baj\xF3 frente a la semana anterior`,
+      evidence: `${fmt2(w.gainPts)} pts de avance esta semana frente a ${fmt2(w.prevGainPts)} pts la anterior.`,
+      action: w.causes[0] ? `Revisar la causa principal registrada: ${labels.loss[w.causes[0].cause] ?? w.causes[0].cause}.` : "Revisar con los frentes la causa (no hay p\xE9rdidas registradas)."
+    });
+  else if (w.prevGainPts != null && w.gainPts > w.prevGainPts * 1.2 && w.gainPts > 0)
+    s.push({
+      tone: "good",
+      title: "La producci\xF3n subi\xF3 frente a la semana anterior",
+      evidence: `${fmt2(w.gainPts)} pts frente a ${fmt2(w.prevGainPts)} pts.`,
+      action: null
+    });
+  const worse = w.deviations.filter((d) => d.trend === "empeora");
+  if (worse.length)
+    s.push({
+      tone: "warning",
+      title: `${worse.length} actividad(es) aumentaron su desviaci\xF3n`,
+      evidence: worse.slice(0, 3).map((d) => `${d.row.code}: ${fmtPts(d.prevGapPts ?? 0)} \u2192 ${fmtPts(d.row.gapPts)}`).join(", "),
+      action: worse[0].row.action ? `${worse[0].row.code}: ${worse[0].row.action}` : null
+    });
+  if (w.findings.overdue || w.findings.impeditive)
+    s.push({
+      tone: w.findings.impeditive ? "critical" : "warning",
+      title: `${w.findings.open} hallazgo(s) abierto(s) al cierre: ${w.findings.overdue} vencido(s)${w.findings.impeditive ? `, ${w.findings.impeditive} impeditivo(s)` : ""}`,
+      evidence: `En la semana se abrieron ${w.findings.opened} y se cerraron ${w.findings.closed}.`,
+      action: "Cerrar o reprogramar los hallazgos vencidos con su responsable."
+    });
+  if (w.completed.length)
+    s.push({
+      tone: "good",
+      title: `${w.completed.length} actividad(es) terminadas en la semana`,
+      evidence: w.completed.slice(0, 4).map((r) => r.code).join(", "),
+      action: null
+    });
+  return s.sort((x, y) => TONE_RANK[x.tone] - TONE_RANK[y.tone]).slice(0, 5);
+}
 export {
   COMPANY_DOCS,
   DEFAULT_SENSITIVITY,
@@ -1802,6 +2500,8 @@ export {
   LIGHT_LABEL,
   MIN_SAMPLES_FOR_RELIABLE,
   PROJECT_SENSITIVITY,
+  REPORT_STATUS_LABEL,
+  REPORT_STATUS_ORDER,
   REQUIRED_COMPANY_DOCS,
   REQUIRED_WORKER_DOCS,
   SCENARIO_LABEL,
@@ -1815,6 +2515,8 @@ export {
   analyzeAcceleration,
   availableDays,
   bottleneck,
+  buildDailyAnalysis,
+  buildWeeklyAnalysis,
   claimableDays,
   colombianHolidays,
   companyCompliance,
@@ -1825,6 +2527,7 @@ export {
   costControl,
   crewOutput,
   criticalPath,
+  dataObservations,
   describePlan,
   diffDays,
   docLabel,
@@ -1833,6 +2536,8 @@ export {
   earnedValue,
   easterSunday,
   energizationReadiness,
+  entryLossLines,
+  equipmentUnitsByActivity,
   evaluatePlan,
   findingAlerts,
   fitAffine,
@@ -1862,6 +2567,7 @@ export {
   polygonAreaM2,
   ppc,
   presentValue,
+  priorityRows,
   progressMatrix,
   projectCompletion,
   projectSensitivity,
@@ -1870,6 +2576,8 @@ export {
   recentDailyRate,
   rectangle,
   referenceDailyRate,
+  reportSnapshot,
+  reportStatusRules,
   reportWeeks,
   requiredEquipment,
   sCurve,

@@ -76,6 +76,22 @@ export function summarizeDailyLogs(logs: DailyLogInput[]): Map<string, DailyLogS
   return out;
 }
 
+/**
+ * Máquinas que trabajaron en cada actividad cada día, según los partes que indican la actividad de
+ * cada equipo (actividad → fecha → unidades). Los equipos sin actividad no se reparten.
+ */
+export function equipmentUnitsByActivity(logs: { date: string; equipment: { name: string; qty: number; activity_id?: string | null }[] }[]): Map<string, Map<string, number>> {
+  const out = new Map<string, Map<string, number>>();
+  for (const l of logs)
+    for (const e of l.equipment ?? []) {
+      if (!e.activity_id || !(Number(e.qty) > 0)) continue;
+      const byDate = out.get(e.activity_id) ?? new Map<string, number>();
+      byDate.set(l.date, (byDate.get(l.date) ?? 0) + Number(e.qty));
+      out.set(e.activity_id, byDate);
+    }
+  return out;
+}
+
 export interface WeatherClaimDay {
   date: string;
   /** Lluvia del parte (intervalos unidos) y la parte que cayó dentro de la jornada. */

@@ -45,7 +45,7 @@ The app already had the data plumbing: offline sync, a schedule engine and appro
 - Weekly lookahead with PPC (percent plan complete).
 - Payment certificates with AIU and VAT, plus a client portal where the client approves them.
 - Claimable rain days, and an "accelerate vs. pay penalty" simulator.
-- Automatic nightly and weekly reports (Telegram / PDF).
+- Daily and weekly reports (web, print/PDF and automatic Telegram PDF): executive summary, top situations with the supporting figure and a suggested action, documented status criteria, S-curve and weekly trends, deviation analysis and data-quality notes. Recorded data, calculations and recommendations are labeled apart.
 - Multi-project management view.
 
 **Integrations**
@@ -76,11 +76,11 @@ supabase/          migrations, RLS, functions, tests
 
 | Package | Tests |
 |---|---:|
-| `packages/engine` | 96 |
+| `packages/engine` | 116 |
 | `packages/importers` | 35 |
 | `packages/forms` | 34 |
-| `apps/mobile` | 57 |
-| `apps/web` (Playwright end-to-end) | 91 |
+| `apps/mobile` | 61 |
+| `apps/web` (Playwright end-to-end) | 93 |
 | `supabase` (functions, incl. Meta AI parsing and grounding) | 45 + database checks |
 
 ## Commands / Comandos

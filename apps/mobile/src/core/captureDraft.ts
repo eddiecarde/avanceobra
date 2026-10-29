@@ -16,6 +16,8 @@ export interface CaptureDraft {
   hours: string | null;
   lostHours: string;
   cause: string;
+  /** Varias pérdidas de tiempo (horas y causa). Los borradores anteriores solo traen lostHours/cause. */
+  losses?: { hours: string; cause: string }[];
   weather: string | null;
   crew: string | null;
   notes: string;
@@ -40,7 +42,8 @@ export function hasContent(d: Omit<CaptureDraft, "v" | "savedAt">): boolean {
     d.area !== null ||
     d.signatureUri !== null ||
     Object.keys(d.values ?? {}).length > 0 ||
-    (d.lostHours !== "0" && d.lostHours.trim() !== "")
+    (d.lostHours !== "0" && d.lostHours.trim() !== "") ||
+    (d.losses ?? []).some((l) => l.hours.trim() !== "" && l.hours !== "0")
   );
 }
 
@@ -62,6 +65,7 @@ export function parseDraft(json: string | null | undefined): CaptureDraft | null
       hours: d.hours ?? null,
       lostHours: d.lostHours ?? "0",
       cause: d.cause ?? "none",
+      losses: Array.isArray(d.losses) ? d.losses : undefined,
       weather: d.weather ?? null,
       crew: d.crew ?? null,
       notes: d.notes ?? "",
