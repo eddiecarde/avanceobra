@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.turbo/
+.env*
+!.env.example
+.expo/
+.next/
+supabase/.temp/
+
+# Secretos locales de Edge Functions (nunca al repositorio)
+supabase/.secrets.local
+
+# Vínculo local con Vercel
+.vercel/

@@ -1,0 +1,13 @@
+# Archivos que EAS no sube al compilar (equivale a .gitignore + extras)
+node_modules/
+dist/
+.turbo/
+.expo/
+.claude/
+.env
+.env.*
+!.env.example
+supabase/tests/
+supabase/setup/01_esquema_y_semilla.sql
+docs/
+supabase/.secrets.local

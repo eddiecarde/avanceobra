@@ -1,0 +1,16 @@
+# Lo que NO se sube a Vercel: secretos, la app móvil y artefactos locales.
+# La web solo necesita apps/web y los paquetes compartidos.
+**/node_modules
+**/.next
+**/.next-e2e
+**/test-results
+**/playwright-report
+**/dist
+**/.turbo
+**/.env*
+!**/.env.example
+supabase
+powersync
+apps/mobile
+.claude
+.vercel

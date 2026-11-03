@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Project xmlns="http://schemas.microsoft.com/project">
+  <Name>parque.xml</Name>
+  <Title>Parque Solar Demo &amp; Subestación</Title>
+  <Tasks>
+    <Task><UID>0</UID><ID>0</ID><Name>Parque Solar</Name><OutlineLevel>0</OutlineLevel><Summary>1</Summary></Task>
+    <Task><UID>1</UID><ID>1</ID><Name>Bloque A</Name><WBS>1</WBS><OutlineLevel>1</OutlineLevel><Summary>1</Summary><Start>2026-09-22T08:00:00</Start><Finish>2026-11-08T17:00:00</Finish></Task>
+    <Task><UID>2</UID><ID>2</ID><Name>Hincado de pilotes</Name><WBS>1.1</WBS><OutlineLevel>2</OutlineLevel><Summary>0</Summary><Milestone>0</Milestone><Start>2026-09-22T08:00:00</Start><Finish>2026-10-24T17:00:00</Finish></Task>
+    <Task><UID>3</UID><ID>3</ID><Name>Montaje de trackers</Name><WBS>1.2</WBS><OutlineLevel>2</OutlineLevel><Summary>0</Summary><Milestone>0</Milestone><Start>2026-09-29T08:00:00</Start><Finish>2026-11-03T17:00:00</Finish>
+      <PredecessorLink><PredecessorUID>2</PredecessorUID><Type>1</Type></PredecessorLink></Task>
+    <Task><UID>4</UID><ID>4</ID><Name>Montaje terminado</Name><WBS>1.3</WBS><OutlineLevel>2</OutlineLevel><Summary>0</Summary><Milestone>1</Milestone><Start>2026-11-03T17:00:00</Start><Finish>2026-11-03T17:00:00</Finish>
+      <PredecessorLink><PredecessorUID>3</PredecessorUID></PredecessorLink></Task>
+    <Task><UID>5</UID><ID>5</ID><Name>Subestación</Name><WBS>2</WBS><OutlineLevel>1</OutlineLevel><Summary>1</Summary></Task>
+    <Task><UID>6</UID><ID>6</ID><Name>Obras civiles</Name><WBS>2.1</WBS><OutlineLevel>2</OutlineLevel><Summary>1</Summary></Task>
+    <Task><UID>7</UID><ID>7</ID><Name>Concreto de bases</Name><WBS>2.1.1</WBS><OutlineLevel>3</OutlineLevel><Summary>0</Summary><Milestone>0</Milestone><Start>2026-10-19T08:00:00</Start><Finish>2026-11-11T17:00:00</Finish>
+      <PredecessorLink><PredecessorUID>4</PredecessorUID></PredecessorLink></Task>
+    <Task><UID>8</UID><ID>8</ID><Name>Tarea inactiva</Name><WBS>2.2</WBS><OutlineLevel>2</OutlineLevel><Summary>0</Summary><Active>0</Active></Task>
+  </Tasks>
+  <Resources/>
+</Project>

@@ -1,0 +1,23 @@
+ERMHDR	19.12	2026-10-21	Project	admin
+%T	PROJECT
+%F	proj_id	proj_short_name
+%R	100	PSD-01
+%R	200	OTRO
+%T	PROJWBS
+%F	wbs_id	proj_id	parent_wbs_id	wbs_short_name	wbs_name	proj_node_flag
+%R	1	100	0	PSD-01	Parque Solar Demo	Y
+%R	2	100	1	BA	Bloque A	N
+%R	3	100	2	BA.EST	Estructura	N
+%R	4	100	1	CS	Cableado MT y subestación	N
+%T	TASK
+%F	task_id	proj_id	wbs_id	task_code	task_name	task_type	target_start_date	target_end_date
+%R	10	100	3	BA-HIN	Hincado de pilotes	TT_Task	2026-09-22 08:00	2026-10-24 17:00
+%R	11	100	3	BA-MON	Montaje de trackers	TT_Task	2026-09-29 08:00	2026-11-03 17:00
+%R	12	100	2	HITO-A	Bloque A terminado	TT_FinMile	2026-11-08 17:00	2026-11-08 17:00
+%R	13	100	4	CS-TMT	Tendido de cable MT	TT_Task	2026-10-04 08:00	2026-11-11 17:00
+%R	20	200	9	X-1	De otro proyecto	TT_Task	2026-10-01 08:00	2026-10-02 17:00
+%T	TASKPRED
+%F	task_pred_id	task_id	pred_task_id	pred_type
+%R	1	11	10	PR_FS
+%R	2	13	12	PR_FS
+%E
